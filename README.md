@@ -145,7 +145,7 @@ cards:
       - entity: sensor.pv_anlage_produktion_heute
         name: Produktion
     stat_types:
-      - max
+      - change
     period: day
     days_to_show: 30
     chart_type: bar
@@ -226,7 +226,7 @@ cards:
     entities:
       - sensor.pv_anlage_produktion_heute
     stat_types:
-      - max
+      - change
     period: day
     days_to_show: 30
     chart_type: bar
