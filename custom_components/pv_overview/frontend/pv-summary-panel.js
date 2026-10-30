@@ -15,6 +15,7 @@ const STYLE = `
   .content { max-width:1280px; margin:0 auto; padding:16px; display:grid; gap:16px; }
   .row { display:grid; gap:16px; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); }
   .row.wide-left { grid-template-columns:minmax(0,1.4fr) minmax(0,1fr); }
+  .row.half { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
   .card { background:var(--card-background-color, #fff); border-radius:var(--ha-card-border-radius, 12px); box-shadow:var(--ha-card-box-shadow, none); border:1px solid var(--divider-color, rgba(0,0,0,.12)); padding:16px; min-width:0; }
   .card h3 { margin:0 0 12px; font-size:15px; font-weight:500; display:flex; align-items:center; gap:8px; }
   .card h3 .hint { margin-left:auto; font-size:12px; font-weight:400; color:var(--secondary-text-color); }
@@ -24,10 +25,13 @@ const STYLE = `
   .chip.on { background:rgba(99,153,34,.18); color:var(--success-color, #43a047); }
   .chip.off { background:rgba(136,135,128,.15); }
   .chips { display:flex; gap:6px; flex-wrap:wrap; margin-left:auto; }
-  .kpis { display:grid; gap:12px; grid-template-columns:repeat(2, minmax(0,1fr)); }
-  .kpi { cursor:pointer; }
+  .kpis { display:grid; gap:12px; grid-template-columns:repeat(2, minmax(0,1fr)); grid-auto-rows:1fr; }
+  .kpi { cursor:pointer; display:flex; align-items:center; gap:12px; padding:12px 14px; }
+  .kpi .ico { flex:none; width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center; --mdc-icon-size:20px; }
+  .kpi .txt { min-width:0; }
+  .flowcard svg { max-height:250px; margin:0 auto; }
   .kpi .lbl { font-size:12px; color:var(--secondary-text-color); }
-  .kpi .val { font-size:26px; font-weight:500; line-height:1.25; }
+  .kpi .val { font-size:22px; font-weight:500; line-height:1.2; white-space:nowrap; }
   .kpi .val small { font-size:13px; font-weight:400; color:var(--secondary-text-color); margin-left:2px; }
   .kpi .sub { font-size:12px; color:var(--secondary-text-color); }
   .up { color:var(--success-color, #43a047) !important; } .down { color:var(--error-color, #db4437) !important; }
@@ -52,7 +56,7 @@ const STYLE = `
   .muted { color:var(--secondary-text-color); }
   .empty { padding:40px 16px; text-align:center; color:var(--secondary-text-color); }
   .click { cursor:pointer; }
-  @media (max-width: 700px) { .row.wide-left { grid-template-columns:1fr; } .content { padding:8px; gap:8px; } .row { gap:8px; } }
+  @media (max-width: 700px) { .row.wide-left, .row.half { grid-template-columns:1fr; } .content { padding:8px; gap:8px; } .row { gap:8px; } }
 `;
 
 class PVSummaryPanel extends HTMLElement {
@@ -233,7 +237,7 @@ class PVSummaryPanel extends HTMLElement {
     this._lastRender = Date.now();
     const parts = [
       this._renderHead(),
-      `<div class="row wide-left">${this._renderFlow()}${this._renderKpis()}</div>`,
+      `<div class="row half">${this._renderFlow()}${this._renderKpis()}</div>`,
       this._renderCurve(),
       `<div class="row wide-left">${this._renderDays()}${this._renderPeriods()}</div>`,
     ];
@@ -245,11 +249,9 @@ class PVSummaryPanel extends HTMLElement {
   _renderHead() {
     const power = this._num("power");
     const active = power !== null && power >= (this._entry.threshold ?? 10);
-    const hours = this._num("production_time_today");
     const chips = [
       `<span class="chip ${active ? "on" : "off"}"><ha-icon icon="${active ? "mdi:white-balance-sunny" : "mdi:weather-night"}" style="--mdc-icon-size:16px"></ha-icon>${active ? "produziert" : "ruht"}</span>`,
     ];
-    if (hours !== null) chips.push(`<span class="chip click" data-key="production_time_today"><ha-icon icon="mdi:timer-sand" style="--mdc-icon-size:16px"></ha-icon>${fmtHours(hours)} Laufzeit</span>`);
     const avg30 = this._num("avg_daily_30");
     if (avg30 !== null) chips.push(`<span class="chip click" data-key="avg_daily_30"><ha-icon icon="mdi:chart-line" style="--mdc-icon-size:16px"></ha-icon>Ø ${fmt(avg30, 1)} kWh/Tag</span>`);
     return `<div class="head"><ha-icon icon="mdi:solar-power-variant" style="color:${COLORS.pv};--mdc-icon-size:28px"></ha-icon><span class="name">${escapeHtml(this._entry.title)}</span><div class="chips">${chips.join("")}</div></div>`;
@@ -297,7 +299,7 @@ class PVSummaryPanel extends HTMLElement {
       </g>`;
     const share = house ? Math.min(100, ((pvToHouse + discharge) / house) * 100) : null;
     const hint = share !== null ? `<span class="hint">${fmt(share, 0)} % aus PV/Akku</span>` : grid === null ? `<span class="hint">Hausverbrauch nicht eingerichtet</span>` : "";
-    return `<div class="card"><h3><ha-icon icon="mdi:transit-connection-variant"></ha-icon>Energiefluss jetzt${hint}</h3>
+    return `<div class="card flowcard"><h3><ha-icon icon="mdi:transit-connection-variant"></ha-icon>Energiefluss jetzt${hint}</h3>
       <svg viewBox="0 ${showGrid ? 0 : 60} 440 ${(showBat ? 240 : 160) - (showGrid ? 0 : 60)}">${lines}${circle(nodes.grid, showGrid)}${circle(nodes.pv)}${circle(nodes.house)}${circle(nodes.bat, showBat)}</svg></div>`;
   }
 
@@ -311,12 +313,22 @@ class PVSummaryPanel extends HTMLElement {
       const pct = ((today - avg30) / avg30) * 100;
       delta = `<div class="sub ${pct >= 0 ? "up" : "down"}">${pct >= 0 ? "+" : "−"}${fmt(Math.abs(pct), 0)} % ggü. Ø 30 Tage</div>`;
     }
-    const kpi = (key, label, value, unit, sub) => `<div class="card kpi" data-key="${key}"><div class="lbl">${label}</div><div class="val">${value}<small>${unit}</small></div>${sub || ""}</div>`;
+    const kpi = (key, icon, color, label, value, unit, sub) => `<div class="card kpi" data-key="${key}">
+        <div class="ico" style="background:${color}22;color:${color}"><ha-icon icon="${icon}"></ha-icon></div>
+        <div class="txt"><div class="lbl">${label}</div><div class="val">${value}<small>${unit}</small></div>${sub || ""}</div>
+      </div>`;
+    const sub = (text) => `<div class="sub">${text || "&nbsp;"}</div>`;
+    const hours = this._num("production_time_today");
+    const sixth = this._has("house_today")
+      ? kpi("house_today", "mdi:home-lightning-bolt-outline", COLORS.house, "Haus heute", fmt(this._num("house_today"), 2), "kWh", sub("Verbrauch"))
+      : kpi("week", "mdi:calendar-week", "#639922", "Diese Woche", fmt(this._num("week"), 1), "kWh", sub(""));
     return `<div class="kpis">
-      ${kpi("today", "Heute", fmt(today, 2), "kWh", delta)}
-      ${kpi("max_power_today", "Spitze heute", fmtWValue(this._num("max_power_today")), fmtWUnit(this._num("max_power_today")), `<div class="sub">${max?.attributes?.time ? "um " + fmtTime(max.attributes.time) : "&nbsp;"}</div>`)}
-      ${kpi("avg_power_today", "Ø Leistung", fmtWValue(this._num("avg_power_today")), fmtWUnit(this._num("avg_power_today")), `<div class="sub">während der Produktion</div>`)}
-      ${kpi("yesterday", "Gestern", fmt(this._num("yesterday"), 2), "kWh", `<div class="sub">${best ? "Bester Tag " + fmt(this._num("best_day"), 1) + " kWh" : "&nbsp;"}</div>`)}
+      ${kpi("today", "mdi:solar-power", COLORS.pv, "Heute", fmt(today, 2), "kWh", delta || sub(""))}
+      ${kpi("yesterday", "mdi:calendar-arrow-left", "#8a8a8a", "Gestern", fmt(this._num("yesterday"), 2), "kWh", sub(best ? "Bester Tag " + fmt(this._num("best_day"), 1) + " kWh" : ""))}
+      ${kpi("max_power_today", "mdi:flash", "#ef6c00", "Spitze heute", fmtWValue(this._num("max_power_today")), fmtWUnit(this._num("max_power_today")), sub(max?.attributes?.time ? "um " + fmtTime(max.attributes.time) : ""))}
+      ${kpi("avg_power_today", "mdi:chart-bell-curve-cumulative", "#c9a000", "Ø Leistung", fmtWValue(this._num("avg_power_today")), fmtWUnit(this._num("avg_power_today")), sub("während der Produktion"))}
+      ${kpi("production_time_today", "mdi:timer-sand", "#5b7290", "Laufzeit heute", hours !== null ? fmtHours(hours).replace(" h", "") : "–", "h", sub(`über ${fmt(this._entry.threshold ?? 10, 0)} W`))}
+      ${sixth}
     </div>`;
   }
 
