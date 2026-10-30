@@ -2,7 +2,9 @@
 
 # PV Summary – Home Assistant Integration
 
-Du gibst nur **einen Sensor mit der aktuellen PV-Leistung** (W oder kW) an – die Integration rechnet daraus Energie und Statistiken.
+Du gibst nur **einen Sensor mit der aktuellen PV-Leistung** (W oder kW) an – die Integration rechnet daraus Energie und Statistiken. Optional kommen Hausverbrauch und Akku dazu. Ein eigenes Dashboard erscheint automatisch als **PV Summary** in der Seitenleiste.
+
+<img src="docs/dashboard.jpg" alt="PV Summary Dashboard mit Beispieldaten" width="640">
 
 ## Installation über HACS
 
@@ -17,9 +19,13 @@ Du gibst nur **einen Sensor mit der aktuellen PV-Leistung** (W oder kW) an – d
    (z. B. mit dem File-Editor- oder Samba-Add-on).
 2. Home Assistant neu starten.
 3. **Einstellungen → Geräte & Dienste → Integration hinzufügen → „PV Summary“**.
-4. Name, PV-Leistungssensor, Schwelle (Standard 10 W) und optional den bisherigen Zählerstand eingeben.
+4. Name, PV-Leistungssensor, Schwelle (Standard 10 W) und optional Hausverbrauch, bisherigen Zählerstand und Akku eingeben.
 
-Später änderbar über **Konfigurieren** an der Integration: Quellsensor, Schwelle und Akku.
+Später änderbar über **Konfigurieren** an der Integration: Quellsensor, Hausverbrauch, Schwelle und Akku.
+
+## Hausverbrauch (optional)
+
+Gibst du einen Sensor mit dem aktuellen Verbrauch deines Hauses an (W oder kW), entstehen die Sensoren *Hausverbrauch*, *Hausverbrauch heute* und *Hausverbrauch gesamt*. Im Dashboard zeigt der Energiefluss dann auch das Netz: Einspeisung oder Bezug wird aus PV, Akku und Hausverbrauch berechnet (Netz = Haus + Akku-Laden − PV).
 
 ## Akku (optional)
 
@@ -50,6 +56,8 @@ Im aufklappbaren Abschnitt **Akku (optional)** kannst du vorhandene Sensoren dei
 | Produktionszeit heute | h | Zeit über der Schwelle |
 | Ø Tagesproduktion 7 / 30 / 365 Tage / gesamt | kWh/d | Nur abgeschlossene Tage |
 | Bester Tag | kWh | Attribut `date` |
+| Hausverbrauch / heute / gesamt | W / kWh | nur mit Hausverbrauchs-Sensor |
+| Akku … | | nur mit Akku-Sensoren, siehe oben |
 
 ## Wie gerechnet wird
 
@@ -60,9 +68,23 @@ Im aufklappbaren Abschnitt **Akku (optional)** kannst du vorhandene Sensoren dei
 - Der Tag der Ersteinrichtung ist unvollständig und zählt nicht in die Durchschnitte.
 - Daten liegen in `/config/.storage/pv_overview.<entry_id>` und überleben Neustarts.
 
-## Fertiges Dashboard
+## Eigenes Dashboard
 
-In [`dashboard/pv-summary-dashboard.yaml`](dashboard/pv-summary-dashboard.yaml) liegt ein komplettes Dashboard mit zwei Ansichten:
+Die Integration bringt ihr eigenes Dashboard mit. Es erscheint nach dem Einrichten automatisch als **PV Summary** in der Seitenleiste – ohne HACS-Karten, ohne YAML und ohne Anpassen von Entity-IDs.
+
+- **Energiefluss jetzt**: PV, Haus, Akku und Netz mit animierten Linien (Netz und Haus nur mit Hausverbrauchs-Sensor)
+- **Kennzahlen**: Heute (mit Vergleich zum Ø der letzten 30 Tage), Spitze heute, Ø Leistung, Gestern
+- **Leistung heute**: Tageskurve für PV, Haus und Akku mit markierter Spitze
+- **Letzte 30 Tage** und **letzte 12 Monate** als Balken, mit Durchschnittslinie und hervorgehobenem besten Tag
+- **Zeiträume**, **Akku** sowie **Durchschnitt und Rekorde**
+- Ein Klick auf einen Wert öffnet den Verlauf des Sensors. Bei mehreren Anlagen schaltest du oben rechts zwischen ihnen um.
+- Helles und dunkles Design folgen deinem Home-Assistant-Theme, auf dem Handy wird alles untereinander angezeigt.
+
+Die Diagramme nutzen den Verlauf und die Langzeitstatistik von Home Assistant. Die 30-Tage- und 12-Monats-Balken füllen sich deshalb erst nach und nach.
+
+## Alternatives YAML-Dashboard
+
+Wer lieber ein normales Lovelace-Dashboard möchte: In [`dashboard/pv-summary-dashboard.yaml`](dashboard/pv-summary-dashboard.yaml) liegt ein komplettes Dashboard mit zwei Ansichten:
 
 - **Übersicht**: aktuelle Leistung als Tacho, Tageswerte, Verlauf über 24 Stunden, Tages- und Monatsproduktion als Balken, Perioden, Durchschnitte, Rekorde und eine Akku-Kurzübersicht
 - **Akku**: Akkustand, Leistung, Spannung und Temperatur mit Verläufen sowie geladene und entladene Energie pro Tag
