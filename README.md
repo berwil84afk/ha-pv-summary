@@ -2,7 +2,7 @@
 
 # PV Summary – Home Assistant Integration
 
-Du gibst nur **einen Sensor mit der aktuellen PV-Leistung** (W oder kW) an – die Integration rechnet daraus Energie und Statistiken. Optional kommen Hausverbrauch, beliebig viele Akkus und einzelne PV-Strings dazu. Ein eigenes Dashboard erscheint automatisch als **PV Summary** in der Seitenleiste.
+Du gibst nur **einen Sensor mit der aktuellen PV-Leistung** (W oder kW) an – die Integration rechnet daraus Energie und Statistiken. Optional kommen Netz-Zähler (oder Hausverbrauch), beliebig viele Akkus und einzelne PV-Strings dazu. Ein eigenes Dashboard erscheint automatisch als **PV Summary** in der Seitenleiste.
 
 <img src="docs/dashboard.jpg" alt="PV Summary Dashboard mit Beispieldaten" width="640">
 
@@ -19,13 +19,16 @@ Du gibst nur **einen Sensor mit der aktuellen PV-Leistung** (W oder kW) an – d
    (z. B. mit dem File-Editor- oder Samba-Add-on).
 2. Home Assistant neu starten.
 3. **Einstellungen → Geräte & Dienste → Integration hinzufügen → „PV Summary“**.
-4. Name, PV-Leistungssensor, Schwelle (Standard 10 W) und optional Hausverbrauch und bisherigen Zählerstand eingeben.
+4. Name, PV-Leistungssensor, Schwelle (Standard 10 W) und optional Netzleistung (Zähler), Hausverbrauch und bisherigen Zählerstand eingeben.
 
-Später änderbar über **Konfigurieren** an der Integration: Quellsensor, Hausverbrauch und Schwelle. Akkus und Strings legst du an der Integration über **Akku hinzufügen** und **String hinzufügen** an.
+Später änderbar über **Konfigurieren** an der Integration: Quellsensor, Netz, Hausverbrauch und Schwelle. Akkus und Strings legst du an der Integration über **Akku hinzufügen** und **String hinzufügen** an.
 
-## Hausverbrauch (optional)
+## Netz und Hausverbrauch (optional)
 
-Gibst du einen Sensor mit dem aktuellen Verbrauch deines Hauses an (W oder kW), entstehen die Sensoren *Hausverbrauch*, *Hausverbrauch heute* und *Hausverbrauch gesamt*. Im Dashboard zeigt der Energiefluss dann auch das Netz: Einspeisung oder Bezug wird aus PV, Akku und Hausverbrauch berechnet (Netz = Haus + Akku-Laden − PV).
+- **Netzleistung (Zähler)**: Sensor am Netz-Zähler, positiv = Bezug, negativ = Einspeisung (W oder kW). Meldet dein Zähler es umgekehrt, setze **Vorzeichen Netz umkehren**. Daraus entstehen *Netzleistung*, *Netzbezug heute/gesamt* und *Einspeisung heute/gesamt*; die Gesamt-Zähler kannst du im **Energie-Dashboard** unter „Stromnetz“ eintragen.
+- **Hausverbrauch** wird dann berechnet: Haus = PV + Netz − Akku (Akku positiv beim Laden). Daraus entstehen *Hausverbrauch*, *Hausverbrauch heute* und *Hausverbrauch gesamt*.
+- Hast du stattdessen einen Sensor, der wirklich den Verbrauch des Hauses misst, trage ihn unter **Hausverbrauch** ein. Ohne Netz-Zähler wird die Netzleistung dann daraus berechnet (Netz = Haus + Akku − PV).
+- Beim Update auf v1.7 wird ein bisher unter „Hausverbrauch“ eingetragener Sensor einmalig ins Feld **Netzleistung (Zähler)** übernommen, weil das bis v1.6 meist der Zähler war. Misst dein Sensor wirklich den Hausverbrauch, trag ihn unter **Konfigurieren** wieder dort ein und leere das Netz-Feld.
 
 ## Akkus (optional, beliebig viele)
 
@@ -62,8 +65,9 @@ An der Integration unter **Einstellungen → Geräte & Dienste → PV Summary** 
 | Produktionszeit heute | h | Zeit über der Schwelle |
 | Ø Tagesproduktion 7 / 30 / 365 Tage / gesamt | kWh/d | Nur abgeschlossene Tage |
 | Bester Tag | kWh | Attribut `date` |
-| Hausverbrauch / heute / gesamt | W / kWh | nur mit Hausverbrauchs-Sensor |
-| Netzleistung | W | nur mit Hausverbrauchs-Sensor; positiv = Bezug, negativ = Einspeisung |
+| Hausverbrauch / heute / gesamt | W / kWh | mit Netz-Zähler berechnet oder gemessen |
+| Netzleistung | W | positiv = Bezug, negativ = Einspeisung |
+| Netzbezug / Einspeisung heute und gesamt | kWh | nur mit Netz-Zähler |
 | Akku …, String … | | siehe oben |
 
 ## Wie gerechnet wird
@@ -79,9 +83,9 @@ An der Integration unter **Einstellungen → Geräte & Dienste → PV Summary** 
 
 Die Integration bringt ihr eigenes Dashboard mit. Es erscheint nach dem Einrichten automatisch als **PV Summary** in der Seitenleiste – ohne HACS-Karten, ohne YAML und ohne Anpassen von Entity-IDs.
 
-- **Energiefluss jetzt**: PV, Haus, Akku und Netz mit animierten Linien (Netz und Haus nur mit Hausverbrauchs-Sensor). Jeder Knoten ist klickbar, beim Akku Leistung und Akkustand getrennt.
+- **Energiefluss jetzt**: PV, Haus, Akku und Netz mit animierten Linien (Netz und Haus nur mit Netz-Zähler oder Hausverbrauch). Die Linien folgen einer echten Bilanz: PV deckt zuerst das Haus, dann den Akku, der Rest geht ins Netz; ein entladender Akku versorgt das Haus und speist den Überschuss ein. Jeder Knoten ist klickbar, beim Akku Leistung und Akkustand getrennt.
 - **Kennzahlen**: Heute (mit Vergleich zum Ø der letzten 30 Tage), Gestern, Spitze heute, Ø Leistung, Laufzeit, Haus heute
-- **Leistung heute**: Tageskurve für PV, Haus und Akku mit markierter Spitze und Tooltip beim Überfahren
+- **Leistung heute**: Tageskurve für PV, Haus, Akku und Netz mit markierter Spitze und Tooltip beim Überfahren
 - **Produktion der letzten 30 Tage** und **der letzten 12 Monate** als Balken, mit Durchschnittslinie und hervorgehobenem besten Tag
 - **Zeiträume**, **Akkus** (jeder Akku einzeln, darunter die Summen) sowie **Durchschnitt und Rekorde**
 - Tab **Strings**: Leistung je String heute im Vergleich, Ertrag je String (heute, gestern, gesamt), Produktion je String der letzten 30 Tage und Anteil jedes Strings am Gesamtertrag
