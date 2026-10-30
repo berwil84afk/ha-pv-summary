@@ -22,6 +22,8 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_BATTERY_INVERT,
+    CONF_BATTERY_POWER,
     CONF_INITIAL_TOTAL,
     CONF_SOURCE,
     CONF_THRESHOLD,
@@ -41,6 +43,7 @@ _LOGGER = logging.getLogger(__name__)
 
 UNIT_FACTORS = {"W": 1.0, "kW": 1_000.0, "MW": 1_000_000.0}
 PERIOD_KEYS = ("total_kwh", "day_kwh", "week_kwh", "month_kwh", "year_kwh")
+BATTERY_DAY_KEYS = ("bat_charge_day_kwh", "bat_discharge_day_kwh")
 
 
 def _default_data(initial_total: float) -> dict[str, Any]:
@@ -65,20 +68,28 @@ def _default_data(initial_total: float) -> dict[str, Any]:
         "start_date": None,
         "history": {},  # "YYYY-MM-DD" -> kWh
         "months": {},  # "YYYY-MM" -> kWh
+        "bat_charge_day_kwh": 0.0,
+        "bat_discharge_day_kwh": 0.0,
+        "bat_charge_total_kwh": 0.0,
+        "bat_discharge_total_kwh": 0.0,
     }
 
 
-def _parse_power(state: State | None) -> float | None:
-    """Zustand des Quellsensors in Watt umrechnen (None = kein gültiger Wert)."""
+def _parse_watts(state: State | None) -> float | None:
+    """Zustand eines Leistungssensors in Watt umrechnen (None = kein gültiger Wert)."""
     if state is None or state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
         return None
     try:
         value = float(state.state)
     except ValueError:
         return None
-    factor = UNIT_FACTORS.get(state.attributes.get(ATTR_UNIT_OF_MEASUREMENT), 1.0)
-    # Manche Wechselrichter melden nachts leicht negative Werte
-    return max(value * factor, 0.0)
+    return value * UNIT_FACTORS.get(state.attributes.get(ATTR_UNIT_OF_MEASUREMENT), 1.0)
+
+
+def _parse_power(state: State | None) -> float | None:
+    """PV-Leistung in W; manche Wechselrichter melden nachts leicht negative Werte."""
+    power = _parse_watts(state)
+    return None if power is None else max(power, 0.0)
 
 
 class PVTracker:
@@ -86,11 +97,18 @@ class PVTracker:
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.hass = hass
-        config = {**entry.data, **entry.options}
+        self.config: dict[str, Any] = {**entry.data, **entry.options}
+        config = self.config
         self.source_entity: str = config[CONF_SOURCE]
         self.threshold = float(config.get(CONF_THRESHOLD, DEFAULT_THRESHOLD))
         self.data = _default_data(float(entry.data.get(CONF_INITIAL_TOTAL, 0.0)))
         self.current_power: float | None = None
+
+        # Akku: Leistung in W, positiv = Laden
+        self.battery_power_entity: str | None = config.get(CONF_BATTERY_POWER)
+        self._battery_sign = -1.0 if config.get(CONF_BATTERY_INVERT) else 1.0
+        self.battery_power: float | None = None
+        self._battery_last_time: datetime | None = None
 
         self._store: Store[dict[str, Any]] = Store(
             hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}"
@@ -123,6 +141,15 @@ class PVTracker:
                 self.hass, self._async_tick, hour=0, minute=0, second=0
             ),
         ]
+        if self.battery_power_entity:
+            self._set_battery_power(
+                self.hass.states.get(self.battery_power_entity), dt_util.utcnow()
+            )
+            self._unsubs.append(
+                async_track_state_change_event(
+                    self.hass, [self.battery_power_entity], self._async_battery_changed
+                )
+            )
 
     async def async_stop(self) -> None:
         for unsub in self._unsubs:
@@ -156,6 +183,14 @@ class PVTracker:
             listener()
 
     @callback
+    def _async_battery_changed(self, event: Event[EventStateChangedData]) -> None:
+        now = dt_util.utcnow()
+        self._integrate(now)
+        self._set_battery_power(event.data["new_state"], now)
+        for listener in list(self._realtime_listeners):
+            listener()
+
+    @callback
     def _async_tick(self, _now: datetime) -> None:
         self._integrate(dt_util.utcnow())
         self._store.async_delay_save(lambda: self.data, SAVE_DELAY)
@@ -176,7 +211,21 @@ class PVTracker:
                 if self.current_power >= self.threshold:
                     self.data["day_active_s"] += seconds
             self._last_time = now
+        if self.battery_power is not None and self._battery_last_time is not None:
+            seconds = (now - self._battery_last_time).total_seconds()
+            if seconds > 0 and self.battery_power != 0:
+                kwh = abs(self.battery_power) * seconds / 3_600_000
+                prefix = "bat_charge" if self.battery_power > 0 else "bat_discharge"
+                self.data[f"{prefix}_day_kwh"] += kwh
+                self.data[f"{prefix}_total_kwh"] += kwh
+            self._battery_last_time = now
         self._check_rollover(dt_util.as_local(now))
+
+    @callback
+    def _set_battery_power(self, state: State | None, now: datetime) -> None:
+        power = _parse_watts(state)
+        self.battery_power = None if power is None else power * self._battery_sign
+        self._battery_last_time = now if power is not None else None
 
     @callback
     def _set_power(self, state: State | None, now: datetime) -> None:
@@ -225,6 +274,8 @@ class PVTracker:
         data["day_max_w"] = 0.0
         data["day_max_time"] = None
         data["day_active_s"] = 0.0
+        for bat_key in BATTERY_DAY_KEYS:
+            data[bat_key] = 0.0
 
         if today.isocalendar()[:2] != current.isocalendar()[:2]:
             data["week_kwh"] = 0.0

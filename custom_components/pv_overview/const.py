@@ -8,6 +8,20 @@ CONF_SOURCE = "source_entity"
 CONF_THRESHOLD = "threshold"
 CONF_INITIAL_TOTAL = "initial_total"
 
+# Optionaler Akku
+SECTION_BATTERY = "battery"
+CONF_BATTERY_SOC = "battery_soc_entity"
+CONF_BATTERY_VOLTAGE = "battery_voltage_entity"
+CONF_BATTERY_TEMPERATURE = "battery_temperature_entity"
+CONF_BATTERY_POWER = "battery_power_entity"
+CONF_BATTERY_INVERT = "battery_invert"  # True: positive Werte bedeuten Entladen
+BATTERY_ENTITY_KEYS = (
+    CONF_BATTERY_SOC,
+    CONF_BATTERY_VOLTAGE,
+    CONF_BATTERY_TEMPERATURE,
+    CONF_BATTERY_POWER,
+)
+
 DEFAULT_NAME = "PV Anlage"
 DEFAULT_THRESHOLD = 10.0  # W – ab dieser Leistung zählt die Zeit als "Produktionszeit"
 
