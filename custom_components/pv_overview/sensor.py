@@ -204,13 +204,21 @@ BATTERY_SOC_SENSOR = PVSensorDescription(
 )
 
 
-# Nur angelegt, wenn ein Hausverbrauchs-Sensor konfiguriert ist
+# Nur angelegt, wenn Netz-Zähler oder Hausverbrauch konfiguriert ist (das jeweils andere wird berechnet)
 HOUSE_SENSORS: tuple[PVSensorDescription, ...] = (
     _power("house_power", lambda t: _rounded(t.house_power), icon="mdi:home-lightning-bolt"),
     _energy("house_today", "house_day_kwh", SensorStateClass.TOTAL_INCREASING, icon="mdi:home-lightning-bolt-outline"),
     _energy("house_total", "house_total_kwh", SensorStateClass.TOTAL_INCREASING, icon="mdi:home-lightning-bolt-outline"),
-    # Berechnet: positiv = Bezug aus dem Netz, negativ = Einspeisung
+    # Positiv = Bezug aus dem Netz, negativ = Einspeisung
     _power("grid_power", lambda t: _rounded(t.grid_power), icon="mdi:transmission-tower"),
+)
+
+# Nur mit Netz-Zähler: Energie für das Energie-Dashboard („Stromnetz“)
+GRID_ENERGY_SENSORS: tuple[PVSensorDescription, ...] = (
+    _energy("grid_import_today", "grid_import_day_kwh", SensorStateClass.TOTAL_INCREASING, icon="mdi:transmission-tower-import"),
+    _energy("grid_export_today", "grid_export_day_kwh", SensorStateClass.TOTAL_INCREASING, icon="mdi:transmission-tower-export"),
+    _energy("grid_import_total", "grid_import_total_kwh", SensorStateClass.TOTAL_INCREASING, icon="mdi:transmission-tower-import"),
+    _energy("grid_export_total", "grid_export_total_kwh", SensorStateClass.TOTAL_INCREASING, icon="mdi:transmission-tower-export"),
 )
 
 
@@ -351,8 +359,10 @@ async def async_setup_entry(
         descriptions += BATTERY_SENSORS
     if tracker.has_battery_soc:
         descriptions.append(BATTERY_SOC_SENSOR)
-    if tracker.house_power_entity:
+    if tracker.has_balance:
         descriptions += HOUSE_SENSORS
+    if tracker.grid_power_entity:
+        descriptions += GRID_ENERGY_SENSORS
     async_add_entities(
         PVOverviewSensor(tracker, f"{entry.entry_id}_{desc.key}", main_device, desc) for desc in descriptions
     )

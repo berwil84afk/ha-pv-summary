@@ -25,6 +25,8 @@ from .const import (
     CONF_BATTERY_SOC,
     CONF_BATTERY_TEMPERATURE,
     CONF_BATTERY_VOLTAGE,
+    CONF_GRID_INVERT,
+    CONF_GRID_POWER,
     CONF_HOUSE_POWER,
     CONF_INITIAL_TOTAL,
     CONF_SOURCE,
@@ -35,6 +37,7 @@ from .const import (
     DEFAULT_NAME,
     DEFAULT_THRESHOLD,
     DOMAIN,
+    GRID_MIGRATED,
     SUBENTRY_BATTERY,
     SUBENTRY_STRING,
 )
@@ -74,14 +77,16 @@ class PVOverviewConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             await self.async_set_unique_id(user_input[CONF_SOURCE])
             self._abort_if_unique_id_configured()
-            return self.async_create_entry(
-                title=user_input[CONF_NAME], data=_clean(user_input, (CONF_HOUSE_POWER,))
-            )
+            data = _clean(user_input, (CONF_GRID_POWER, CONF_HOUSE_POWER))
+            data[GRID_MIGRATED] = True
+            return self.async_create_entry(title=user_input[CONF_NAME], data=data)
 
         schema = vol.Schema(
             {
                 vol.Required(CONF_NAME, default=DEFAULT_NAME): selector.TextSelector(),
                 vol.Required(CONF_SOURCE): SOURCE_SELECTOR,
+                vol.Optional(CONF_GRID_POWER): SOURCE_SELECTOR,
+                vol.Optional(CONF_GRID_INVERT, default=False): selector.BooleanSelector(),
                 vol.Optional(CONF_HOUSE_POWER): SOURCE_SELECTOR,
                 vol.Required(CONF_THRESHOLD, default=DEFAULT_THRESHOLD): THRESHOLD_SELECTOR,
                 vol.Required(CONF_INITIAL_TOTAL, default=0): selector.NumberSelector(
@@ -112,16 +117,18 @@ class PVOverviewConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class PVOverviewOptionsFlow(OptionsFlow):
-    """Quelle, Hausverbrauch und Schwellwert nachträglich ändern."""
+    """Quelle, Netz, Hausverbrauch und Schwellwert nachträglich ändern."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
-            return self.async_create_entry(data=_clean(user_input, (CONF_HOUSE_POWER,)))
+            return self.async_create_entry(data=_clean(user_input, (CONF_GRID_POWER, CONF_HOUSE_POWER)))
 
         config = {**self.config_entry.data, **self.config_entry.options}
         schema = vol.Schema(
             {
                 vol.Required(CONF_SOURCE, default=config[CONF_SOURCE]): SOURCE_SELECTOR,
+                _optional(CONF_GRID_POWER, config): SOURCE_SELECTOR,
+                vol.Optional(CONF_GRID_INVERT, default=bool(config.get(CONF_GRID_INVERT))): selector.BooleanSelector(),
                 _optional(CONF_HOUSE_POWER, config): SOURCE_SELECTOR,
                 vol.Required(
                     CONF_THRESHOLD, default=config.get(CONF_THRESHOLD, DEFAULT_THRESHOLD)

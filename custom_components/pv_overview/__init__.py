@@ -14,7 +14,10 @@ from .const import (
     BATTERY_ENTITY_KEYS,
     CONF_BATTERY_CAPACITY,
     CONF_BATTERY_INVERT,
+    CONF_GRID_POWER,
+    CONF_HOUSE_POWER,
     DOMAIN,
+    GRID_MIGRATED,
     STORAGE_VERSION,
     SUBENTRY_BATTERY,
 )
@@ -30,6 +33,7 @@ type PVConfigEntry = ConfigEntry[PVTracker]
 async def async_setup_entry(hass: HomeAssistant, entry: PVConfigEntry) -> bool:
     """Integration aus einem Config Entry einrichten."""
     _async_migrate_battery(hass, entry)
+    _async_migrate_grid(hass, entry)
 
     tracker = PVTracker(hass, entry)
     await tracker.async_start()
@@ -89,3 +93,22 @@ def _async_migrate_battery(hass: HomeAssistant, entry: ConfigEntry) -> None:
     for key in ("battery_voltage", "battery_temperature"):
         if entity_id := registry.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_{key}"):
             registry.async_remove(entity_id)
+
+
+@callback
+def _async_migrate_grid(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Bis v1.6 hieß das Feld „Hausverbrauch“, war aber meist der Netzbezug am Zähler.
+
+    Einmalig wird der eingetragene Sensor ins neue Feld „Netzleistung (Zähler)“ übernommen;
+    der Hausverbrauch wird danach aus PV, Akku und Netz berechnet.
+    """
+    if entry.data.get(GRID_MIGRATED):
+        return
+    data = dict(entry.data)
+    options = dict(entry.options)
+    for store in (data, options):
+        if store.get(CONF_HOUSE_POWER) and not store.get(CONF_GRID_POWER):
+            store[CONF_GRID_POWER] = store[CONF_HOUSE_POWER]
+            store[CONF_HOUSE_POWER] = None
+    data[GRID_MIGRATED] = True
+    hass.config_entries.async_update_entry(entry, data=data, options=options)
