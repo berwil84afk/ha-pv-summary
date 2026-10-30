@@ -19,7 +19,22 @@ Du gibst nur **einen Sensor mit der aktuellen PV-Leistung** (W oder kW) an – d
 3. **Einstellungen → Geräte & Dienste → Integration hinzufügen → „PV Summary“**.
 4. Name, PV-Leistungssensor, Schwelle (Standard 10 W) und optional den bisherigen Zählerstand eingeben.
 
-Später änderbar über **Konfigurieren** an der Integration: Quellsensor und Schwelle.
+Später änderbar über **Konfigurieren** an der Integration: Quellsensor, Schwelle und Akku.
+
+## Akku (optional)
+
+Im aufklappbaren Abschnitt **Akku (optional)** kannst du vorhandene Sensoren deines Batteriespeichers angeben. Jedes Feld ist einzeln optional:
+
+| Feld | Erwartet | Erzeugt |
+|---|---|---|
+| Akkustand | Sensor in % | Akkustand |
+| Akkuspannung | Sensor in V (oder mV) | Akkuspannung |
+| Akkutemperatur | Sensor in °C (oder °F) | Akkutemperatur |
+| Lade-/Entladeleistung | **ein** Sensor mit Vorzeichen in W oder kW | Akkuleistung, Akku Ladeleistung, Akku Entladeleistung, Akku geladen/entladen heute, Akku geladen/entladen gesamt |
+
+- Standard: positive Leistung = Laden, negative = Entladen. Meldet dein Sensor es umgekehrt, den Schalter **Vorzeichen umkehren** setzen.
+- *Akku geladen gesamt* und *Akku entladen gesamt* kannst du im **Energie-Dashboard** unter „Batteriespeicher“ eintragen.
+- Ein Akku-Sensor wird entfernt, indem du das Feld unter **Konfigurieren** leerst.
 
 ## Erzeugte Sensoren
 
@@ -44,6 +59,25 @@ Später änderbar über **Konfigurieren** an der Integration: Quellsensor und Sc
 - Tage, Wochen (ISO, ab Montag), Monate und Jahre werden um Mitternacht abgeschlossen – auch wenn HA über Mitternacht aus war.
 - Der Tag der Ersteinrichtung ist unvollständig und zählt nicht in die Durchschnitte.
 - Daten liegen in `/config/.storage/pv_overview.<entry_id>` und überleben Neustarts.
+
+## Fertiges Dashboard
+
+In [`dashboard/pv-summary-dashboard.yaml`](dashboard/pv-summary-dashboard.yaml) liegt ein komplettes Dashboard mit zwei Ansichten:
+
+- **Übersicht**: aktuelle Leistung als Tacho, Tageswerte, Verlauf über 24 Stunden, Tages- und Monatsproduktion als Balken, Perioden, Durchschnitte, Rekorde und eine Akku-Kurzübersicht
+- **Akku**: Akkustand, Leistung, Spannung und Temperatur mit Verläufen sowie geladene und entladene Energie pro Tag
+
+So bindest du es ein:
+
+1. **Einstellungen → Dashboards → Dashboard hinzufügen → „Neues Dashboard von Grund auf“**, z. B. mit dem Namen „PV“
+2. Dashboard öffnen → Stift (Bearbeiten) → **⋮ → Rohkonfigurationseditor**
+3. Den gesamten Inhalt durch die Datei ersetzen und speichern
+
+Hinweise:
+
+- Die Entity-IDs gehen von einer Anlage namens „PV Anlage“ aus (`sensor.pv_anlage_…`). Bei einem anderen Namen das Präfix per Suchen und Ersetzen anpassen.
+- Ohne Akku blendet sich der Akku-Abschnitt der Übersicht automatisch aus. Die Ansicht „Akku“ kannst du dann löschen.
+- Die Skala des Leistungstachos (0–2000 W) an deine Anlage anpassen (`max:` und die `segments`).
 
 ## Beispielkarten
 
