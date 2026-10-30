@@ -2,7 +2,7 @@
 
 # PV Summary – Home Assistant Integration
 
-Du gibst nur **einen Sensor mit der aktuellen PV-Leistung** (W oder kW) an – die Integration rechnet daraus Energie und Statistiken. Optional kommen Hausverbrauch und Akku dazu. Ein eigenes Dashboard erscheint automatisch als **PV Summary** in der Seitenleiste.
+Du gibst nur **einen Sensor mit der aktuellen PV-Leistung** (W oder kW) an – die Integration rechnet daraus Energie und Statistiken. Optional kommen Hausverbrauch, beliebig viele Akkus und einzelne PV-Strings dazu. Ein eigenes Dashboard erscheint automatisch als **PV Summary** in der Seitenleiste.
 
 <img src="docs/dashboard.jpg" alt="PV Summary Dashboard mit Beispieldaten" width="640">
 
@@ -19,28 +19,34 @@ Du gibst nur **einen Sensor mit der aktuellen PV-Leistung** (W oder kW) an – d
    (z. B. mit dem File-Editor- oder Samba-Add-on).
 2. Home Assistant neu starten.
 3. **Einstellungen → Geräte & Dienste → Integration hinzufügen → „PV Summary“**.
-4. Name, PV-Leistungssensor, Schwelle (Standard 10 W) und optional Hausverbrauch, bisherigen Zählerstand und Akku eingeben.
+4. Name, PV-Leistungssensor, Schwelle (Standard 10 W) und optional Hausverbrauch und bisherigen Zählerstand eingeben.
 
-Später änderbar über **Konfigurieren** an der Integration: Quellsensor, Hausverbrauch, Schwelle und Akku.
+Später änderbar über **Konfigurieren** an der Integration: Quellsensor, Hausverbrauch und Schwelle. Akkus und Strings legst du an der Integration über **Akku hinzufügen** und **String hinzufügen** an.
 
 ## Hausverbrauch (optional)
 
 Gibst du einen Sensor mit dem aktuellen Verbrauch deines Hauses an (W oder kW), entstehen die Sensoren *Hausverbrauch*, *Hausverbrauch heute* und *Hausverbrauch gesamt*. Im Dashboard zeigt der Energiefluss dann auch das Netz: Einspeisung oder Bezug wird aus PV, Akku und Hausverbrauch berechnet (Netz = Haus + Akku-Laden − PV).
 
-## Akku (optional)
+## Akkus (optional, beliebig viele)
 
-Im aufklappbaren Abschnitt **Akku (optional)** kannst du vorhandene Sensoren deines Batteriespeichers angeben. Jedes Feld ist einzeln optional:
+An der Integration unter **Einstellungen → Geräte & Dienste → PV Summary** legst du über **Akku hinzufügen** einen oder mehrere Akkus an. Jedes Feld ist optional:
 
-| Feld | Erwartet | Erzeugt |
-|---|---|---|
-| Akkustand | Sensor in % | Akkustand |
-| Akkuspannung | Sensor in V (oder mV) | Akkuspannung |
-| Akkutemperatur | Sensor in °C (oder °F) | Akkutemperatur |
-| Lade-/Entladeleistung | **ein** Sensor mit Vorzeichen in W oder kW | Akkuleistung, Akku Ladeleistung, Akku Entladeleistung, Akku geladen/entladen heute, Akku geladen/entladen gesamt |
+| Feld | Erwartet |
+|---|---|
+| Akkustand | Sensor in % |
+| Lade-/Entladeleistung | **ein** Sensor mit Vorzeichen in W oder kW (positiv = Laden) |
+| Vorzeichen umkehren | einschalten, wenn dein Sensor beim Entladen positive Werte meldet |
+| Kapazität | kWh, gewichtet den gemeinsamen Akkustand |
+| Akkuspannung, Akkutemperatur | Sensoren in V/mV bzw. °C/°F |
 
-- Standard: positive Leistung = Laden, negative = Entladen. Meldet dein Sensor es umgekehrt, den Schalter **Vorzeichen umkehren** setzen.
+- Jeder Akku bekommt ein eigenes Gerät mit *Akkustand*, *Akkuleistung*, *Akku geladen heute*, *Akku entladen heute* und, falls angegeben, Spannung und Temperatur.
+- An der Anlage gibt es die Summen aller Akkus: *Akkuleistung*, *Akku Lade-/Entladeleistung*, *Akku geladen/entladen heute und gesamt* sowie den gemeinsamen *Akkustand*. Der gemeinsame Akkustand ist nach Kapazität gewichtet, wenn bei allen Akkus eine Kapazität eingetragen ist, sonst der einfache Durchschnitt.
 - *Akku geladen gesamt* und *Akku entladen gesamt* kannst du im **Energie-Dashboard** unter „Batteriespeicher“ eintragen.
-- Ein Akku-Sensor wird entfernt, indem du das Feld unter **Konfigurieren** leerst.
+- Ein bis v1.5 eingerichteter Akku wird beim Update automatisch als „Akku“ übernommen.
+
+## Strings (optional)
+
+Über **String hinzufügen** trägst du einzelne PV-Strings ein: Leistung (Pflicht), Spannung und Strom (optional). Jeder String bekommt ein eigenes Gerät mit *Leistung*, *Produktion heute*, *Produktion gesamt* und gegebenenfalls *Spannung* und *Strom*. Sobald mindestens ein String eingetragen ist, hat das Dashboard einen zusätzlichen Tab **Strings**.
 
 ## Erzeugte Sensoren
 
@@ -57,7 +63,8 @@ Im aufklappbaren Abschnitt **Akku (optional)** kannst du vorhandene Sensoren dei
 | Ø Tagesproduktion 7 / 30 / 365 Tage / gesamt | kWh/d | Nur abgeschlossene Tage |
 | Bester Tag | kWh | Attribut `date` |
 | Hausverbrauch / heute / gesamt | W / kWh | nur mit Hausverbrauchs-Sensor |
-| Akku … | | nur mit Akku-Sensoren, siehe oben |
+| Netzleistung | W | nur mit Hausverbrauchs-Sensor; positiv = Bezug, negativ = Einspeisung |
+| Akku …, String … | | siehe oben |
 
 ## Wie gerechnet wird
 
@@ -72,12 +79,13 @@ Im aufklappbaren Abschnitt **Akku (optional)** kannst du vorhandene Sensoren dei
 
 Die Integration bringt ihr eigenes Dashboard mit. Es erscheint nach dem Einrichten automatisch als **PV Summary** in der Seitenleiste – ohne HACS-Karten, ohne YAML und ohne Anpassen von Entity-IDs.
 
-- **Energiefluss jetzt**: PV, Haus, Akku und Netz mit animierten Linien (Netz und Haus nur mit Hausverbrauchs-Sensor)
-- **Kennzahlen**: Heute (mit Vergleich zum Ø der letzten 30 Tage), Spitze heute, Ø Leistung, Gestern
-- **Leistung heute**: Tageskurve für PV, Haus und Akku mit markierter Spitze
-- **Letzte 30 Tage** und **letzte 12 Monate** als Balken, mit Durchschnittslinie und hervorgehobenem besten Tag
-- **Zeiträume**, **Akku** sowie **Durchschnitt und Rekorde**
-- Ein Klick auf einen Wert öffnet den Verlauf des Sensors. Bei mehreren Anlagen schaltest du oben rechts zwischen ihnen um.
+- **Energiefluss jetzt**: PV, Haus, Akku und Netz mit animierten Linien (Netz und Haus nur mit Hausverbrauchs-Sensor). Jeder Knoten ist klickbar, beim Akku Leistung und Akkustand getrennt.
+- **Kennzahlen**: Heute (mit Vergleich zum Ø der letzten 30 Tage), Gestern, Spitze heute, Ø Leistung, Laufzeit, Haus heute
+- **Leistung heute**: Tageskurve für PV, Haus und Akku mit markierter Spitze und Tooltip beim Überfahren
+- **Produktion der letzten 30 Tage** und **der letzten 12 Monate** als Balken, mit Durchschnittslinie und hervorgehobenem besten Tag
+- **Zeiträume**, **Akkus** (jeder Akku einzeln, darunter die Summen) sowie **Durchschnitt und Rekorde**
+- Tab **Strings**: Leistung je String heute im Vergleich, Ertrag je String (heute, gestern, gesamt), Produktion je String der letzten 30 Tage und Anteil jedes Strings am Gesamtertrag
+- Ein Klick auf einen Wert im Energiefluss, bei den Akkus oder Strings öffnet den Verlauf des Sensors. Bei mehreren Anlagen schaltest du oben rechts zwischen ihnen um.
 - Helles und dunkles Design folgen deinem Home-Assistant-Theme, auf dem Handy wird alles untereinander angezeigt.
 
 Die Diagramme nutzen den Verlauf und die Langzeitstatistik von Home Assistant. Die 30-Tage- und 12-Monats-Balken füllen sich deshalb erst nach und nach.
