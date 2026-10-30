@@ -249,7 +249,7 @@ class PVSummaryPanel extends HTMLElement {
     const start = new Date(); start.setHours(0, 0, 0, 0);
     const strings = entry.strings || [];
     const ids = [
-      ...["power", "battery_power", "house_power"],
+      ...["power", "battery_power", "house_power", "grid_power"],
       ...strings.map((s) => `${s.id}|string_power`),
     ].map((k) => this._id(k)).filter(Boolean);
     const total = this._id("total");
@@ -322,7 +322,8 @@ class PVSummaryPanel extends HTMLElement {
         this._renderCurve("main", "Leistung heute", "mdi:chart-areaspline", [
           { key: "power", color: COLORS.pv, fill: true, peak: true, label: "PV" },
           { key: "house_power", color: COLORS.house, label: "Haus" },
-          { key: "battery_power", color: COLORS.bat, signed: true, label: "Akku" },
+          { key: "battery_power", color: COLORS.bat, signed: ["lädt", "entlädt"], label: "Akku" },
+          { key: "grid_power", color: COLORS.grid, signed: ["Bezug", "Einspeisung"], label: "Netz" },
         ]),
         `<div class="row wide-left">${this._renderDays()}${this._renderPeriods()}</div>`,
       );
@@ -353,34 +354,44 @@ class PVSummaryPanel extends HTMLElement {
     const house = this._has("house_power") ? this._num("house_power") ?? 0 : null;
     const soc = this._num("battery_soc");
 
-    // Netz = Haus + Akku-Laden − PV (positiv = Bezug, negativ = Einspeisung)
-    const grid = house !== null ? house + (bat ?? 0) - pv : null;
+    // Netz kommt vom Zähler (bzw. aus dem Hausverbrauch berechnet): positiv = Bezug, negativ = Einspeisung
+    const grid = this._has("grid_power") ? this._num("grid_power") ?? 0 : null;
     const charge = bat !== null ? Math.max(bat, 0) : 0;
     const discharge = bat !== null ? Math.max(-bat, 0) : 0;
-    const pvToBat = Math.min(pv, charge);
-    const pvToHouse = house !== null ? Math.min(pv - pvToBat, house) : pv - pvToBat;
-    const pvToGrid = grid !== null ? Math.max(-grid, 0) : 0;
-    const gridToHouse = grid !== null ? Math.max(grid, 0) : 0;
+    const imp = grid !== null ? Math.max(grid, 0) : 0;
+    const exp = grid !== null ? Math.max(-grid, 0) : 0;
+    // Bilanz: Quellen (PV, Akku-Entladen, Netzbezug) auf Senken (Haus, Akku-Laden, Einspeisung) verteilen
+    const need = house ?? Math.max(pv - charge, 0);
+    const pvToHouse = Math.min(pv, need);
+    const pvToBat = Math.min(pv - pvToHouse, charge);
+    const pvToGrid = Math.min(pv - pvToHouse - pvToBat, exp);
+    const batToHouse = Math.min(discharge, need - pvToHouse);
+    const batToGrid = Math.min(discharge - batToHouse, Math.max(exp - pvToGrid, 0));
+    const gridToHouse = Math.min(imp, Math.max(need - pvToHouse - batToHouse, 0));
+    const gridToBat = Math.min(Math.max(imp - gridToHouse, 0), Math.max(charge - pvToBat, 0));
 
     const nodes = {
       pv: { x: 60, y: 110, color: COLORS.pv, icon: "mdi:solar-power-variant", label: "PV", value: fmtW(pv), key: "power" },
-      house: { x: 380, y: 110, color: COLORS.house, icon: "mdi:home", label: house !== null ? "Haus" : "Haus/Netz", value: house !== null ? fmtW(house) : "≈ " + fmtW(Math.max(pv - pvToBat, 0)), key: house !== null ? "house_power" : null },
+      house: { x: 380, y: 110, color: COLORS.house, icon: "mdi:home", label: house !== null ? "Haus" : "Haus/Netz", value: house !== null ? fmtW(house) : "≈ " + fmtW(need), key: house !== null ? "house_power" : null },
       // Leistung öffnet die Lade-/Entladeleistung, die Prozentzahl den Akkustand
       bat: { x: 220, y: 195, color: COLORS.bat, icon: "mdi:home-battery", label: soc !== null ? `${fmt(soc, 0)} %` : "Akku", value: bat !== null ? (bat > 0 ? "+" : bat < 0 ? "−" : "") + fmtW(Math.abs(bat)) : "", key: this._has("battery_power") ? "battery_power" : soc !== null ? "battery_soc" : null, labelKey: bat !== null && soc !== null ? "battery_soc" : null },
       grid: { x: 220, y: 45, color: COLORS.grid, icon: "mdi:transmission-tower", label: grid === null || Math.abs(grid) <= 1 ? "Netz" : grid < 0 ? "Einspeisung" : "Bezug", value: grid !== null ? fmtW(Math.abs(grid)) : "", key: this._has("grid_power") ? "grid_power" : null },
     };
-    const line = (from, to, amount, color) => {
-      const a = nodes[from], b = nodes[to];
+    const line = (a, b, forward, backward, colorA, colorB) => {
+      const reverse = backward > 1 && backward > forward;
+      const amount = reverse ? backward : forward;
+      const [from, to] = reverse ? [nodes[b], nodes[a]] : [nodes[a], nodes[b]];
       const active = amount > 1;
       const cls = active ? `flow ${amount < 100 ? "slow" : ""}` : "idle";
-      const stroke = active ? color : "";
-      return `<path d="M${a.x} ${a.y} L${b.x} ${b.y}" class="${cls}" stroke="${stroke}" stroke-width="${active ? 3 : 2}" fill="none"/>`;
+      const stroke = active ? (reverse ? colorB : colorA) : "";
+      return `<path d="M${from.x} ${from.y} L${to.x} ${to.y}" class="${cls}" stroke="${stroke}" stroke-width="${active ? 3 : 2}" fill="none"/>`;
     };
     const showBat = bat !== null || soc !== null;
     const showGrid = grid !== null;
-    let lines = line("pv", "house", pvToHouse, COLORS.pv);
-    if (showBat) lines += line("pv", "bat", pvToBat, COLORS.pv) + line("bat", "house", discharge, COLORS.bat);
-    if (showGrid) lines += line("pv", "grid", pvToGrid, COLORS.pv) + line("grid", "house", gridToHouse, COLORS.grid);
+    let lines = line("pv", "house", pvToHouse, 0, COLORS.pv);
+    if (showBat) lines += line("pv", "bat", pvToBat, 0, COLORS.pv) + line("bat", "house", batToHouse, 0, COLORS.bat);
+    if (showGrid) lines += line("pv", "grid", pvToGrid, 0, COLORS.pv) + line("grid", "house", gridToHouse, 0, COLORS.grid);
+    if (showGrid && showBat) lines += line("bat", "grid", batToGrid, gridToBat, COLORS.bat, COLORS.grid);
     const circle = (n, show = true) => !show ? "" : `
       <g class="${n.key ? "click" : ""}" ${n.key ? `data-key="${n.key}"` : ""}>
         <circle cx="${n.x}" cy="${n.y}" r="40" fill="var(--card-background-color, #fff)" stroke="${n.color}" stroke-width="3"/>
@@ -388,7 +399,7 @@ class PVSummaryPanel extends HTMLElement {
         <text x="${n.x}" y="${n.y + 8}" text-anchor="middle" class="strong" style="font-size:13px">${n.value || n.label}</text>
         <text x="${n.x}" y="${n.y + 23}" text-anchor="middle" style="font-size:${n.labelKey ? 12 : 10}px" ${n.labelKey ? `class="click strong" data-key="${n.labelKey}"` : ""}>${n.value ? n.label : ""}</text>
       </g>`;
-    const share = house ? Math.min(100, ((pvToHouse + discharge) / house) * 100) : null;
+    const share = house ? Math.min(100, ((pvToHouse + batToHouse) / house) * 100) : null;
     const hint = share !== null ? `<span class="hint">${fmt(share, 0)} % aus PV/Akku</span>` : grid === null ? `<span class="hint">Hausverbrauch nicht eingerichtet</span>` : "";
     return `<div class="card flowcard"><h3><ha-icon icon="mdi:transit-connection-variant"></ha-icon>Energiefluss jetzt${hint}</h3>
       <svg viewBox="0 ${showGrid ? 0 : 60} 440 ${(showBat ? 240 : 160) - (showGrid ? 0 : 60)}">${lines}${circle(nodes.grid, showGrid)}${circle(nodes.pv)}${circle(nodes.house)}${circle(nodes.bat, showBat)}</svg></div>`;
@@ -513,7 +524,7 @@ class PVSummaryPanel extends HTMLElement {
       dot.style.display = "";
       dot.setAttribute("cx", xv); dot.setAttribute("cy", c.y(v));
       let text = fmtW(Math.abs(v));
-      if (s.signed) text = v > 1 ? `+${text} lädt` : v < -1 ? `−${text} entlädt` : text;
+      if (s.signed) text = v > 1 ? `+${text} ${s.signed[0]}` : v < -1 ? `−${text} ${s.signed[1]}` : text;
       return `<div class="r"><span class="dot" style="width:8px;height:8px;background:${s.color}"></span>${escapeHtml(s.label)}<b>${text}</b></div>`;
     }).join("");
     const time = new Date(t).toLocaleTimeString(LOCALE(), { hour: "2-digit", minute: "2-digit" });
