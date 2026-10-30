@@ -15,23 +15,6 @@
           "threshold": "Time above this power counts as production time.",
           "initial_total": "Optional: previous total production of your system in kWh.",
           "house_power_entity": "Sensor with the current consumption of your house in W or kW. Used for the energy flow in the dashboard."
-        },
-        "sections": {
-          "battery": {
-            "name": "Battery (optional)",
-            "description": "Only fill in if you have a battery storage. Every field is optional.",
-            "data": {
-              "battery_soc_entity": "State of charge (%)",
-              "battery_voltage_entity": "Battery voltage",
-              "battery_temperature_entity": "Battery temperature",
-              "battery_power_entity": "Charge/discharge power",
-              "battery_invert": "Invert sign"
-            },
-            "data_description": {
-              "battery_power_entity": "One signed sensor: positive = charging, negative = discharging.",
-              "battery_invert": "Enable if your sensor reports positive values while discharging."
-            }
-          }
         }
       }
     },
@@ -47,23 +30,6 @@
           "source_entity": "PV power sensor",
           "house_power_entity": "House consumption (optional)",
           "threshold": "Production time threshold"
-        },
-        "sections": {
-          "battery": {
-            "name": "Battery (optional)",
-            "description": "Clear a field to remove that battery sensor.",
-            "data": {
-              "battery_soc_entity": "State of charge (%)",
-              "battery_voltage_entity": "Battery voltage",
-              "battery_temperature_entity": "Battery temperature",
-              "battery_power_entity": "Charge/discharge power",
-              "battery_invert": "Invert sign"
-            },
-            "data_description": {
-              "battery_power_entity": "One signed sensor: positive = charging, negative = discharging.",
-              "battery_invert": "Enable if your sensor reports positive values while discharging."
-            }
-          }
         },
         "data_description": {
           "house_power_entity": "Sensor with the current consumption of your house in W or kW. Used for the energy flow in the dashboard."
@@ -165,6 +131,99 @@
       },
       "grid_power": {
         "name": "Grid power"
+      },
+      "string_power": {
+        "name": "Power"
+      },
+      "string_today": {
+        "name": "Production today"
+      },
+      "string_total": {
+        "name": "Production total"
+      },
+      "string_voltage": {
+        "name": "Voltage"
+      },
+      "string_current": {
+        "name": "Current"
+      }
+    }
+  },
+  "config_subentries": {
+    "battery": {
+      "entry_type": "Battery",
+      "initiate_flow": {
+        "user": "Add battery",
+        "reconfigure": "Edit battery"
+      },
+      "step": {
+        "user": {
+          "title": "Add battery",
+          "data": {
+            "name": "Name",
+            "battery_soc_entity": "State of charge (%)",
+            "battery_power_entity": "Charge/discharge power",
+            "battery_invert": "Invert sign",
+            "battery_capacity": "Capacity",
+            "battery_voltage_entity": "Battery voltage",
+            "battery_temperature_entity": "Battery temperature"
+          },
+          "data_description": {
+            "battery_power_entity": "One signed sensor: positive = charging, negative = discharging.",
+            "battery_invert": "Enable if your sensor reports positive values while discharging.",
+            "battery_capacity": "Optional. Weights the combined state of charge when you have several batteries."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit battery",
+          "data": {
+            "name": "Name",
+            "battery_soc_entity": "State of charge (%)",
+            "battery_power_entity": "Charge/discharge power",
+            "battery_invert": "Invert sign",
+            "battery_capacity": "Capacity",
+            "battery_voltage_entity": "Battery voltage",
+            "battery_temperature_entity": "Battery temperature"
+          },
+          "data_description": {
+            "battery_power_entity": "One signed sensor: positive = charging, negative = discharging.",
+            "battery_invert": "Enable if your sensor reports positive values while discharging.",
+            "battery_capacity": "Optional. Weights the combined state of charge when you have several batteries."
+          }
+        }
+      }
+    },
+    "string": {
+      "entry_type": "PV string",
+      "initiate_flow": {
+        "user": "Add string",
+        "reconfigure": "Edit string"
+      },
+      "step": {
+        "user": {
+          "title": "Add string",
+          "data": {
+            "name": "Name",
+            "string_power_entity": "String power",
+            "string_voltage_entity": "Voltage (optional)",
+            "string_current_entity": "Current (optional)"
+          },
+          "data_description": {
+            "string_power_entity": "Sensor with the current power of this string in W or kW."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit string",
+          "data": {
+            "name": "Name",
+            "string_power_entity": "String power",
+            "string_voltage_entity": "Voltage (optional)",
+            "string_current_entity": "Current (optional)"
+          },
+          "data_description": {
+            "string_power_entity": "Sensor with the current power of this string in W or kW."
+          }
+        }
       }
     }
   }

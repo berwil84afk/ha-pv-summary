@@ -15,23 +15,6 @@
           "threshold": "Ab dieser Leistung zählt die Zeit als Produktionszeit.",
           "initial_total": "Optional: bisherige Gesamtproduktion deiner Anlage in kWh.",
           "house_power_entity": "Sensor mit dem aktuellen Verbrauch deines Hauses in W oder kW. Wird für den Energiefluss im Dashboard genutzt."
-        },
-        "sections": {
-          "battery": {
-            "name": "Akku (optional)",
-            "description": "Nur ausfüllen, wenn ein Batteriespeicher vorhanden ist. Jedes Feld ist einzeln optional.",
-            "data": {
-              "battery_soc_entity": "Akkustand (%)",
-              "battery_voltage_entity": "Akkuspannung",
-              "battery_temperature_entity": "Akkutemperatur",
-              "battery_power_entity": "Lade-/Entladeleistung",
-              "battery_invert": "Vorzeichen umkehren"
-            },
-            "data_description": {
-              "battery_power_entity": "Ein Sensor mit Vorzeichen: positiv = Laden, negativ = Entladen.",
-              "battery_invert": "Einschalten, wenn dein Sensor beim Entladen positive Werte meldet."
-            }
-          }
         }
       }
     },
@@ -47,23 +30,6 @@
           "source_entity": "PV-Leistungssensor",
           "house_power_entity": "Hausverbrauch (optional)",
           "threshold": "Schwelle für Produktionszeit"
-        },
-        "sections": {
-          "battery": {
-            "name": "Akku (optional)",
-            "description": "Feld leeren, um einen Akku-Sensor zu entfernen.",
-            "data": {
-              "battery_soc_entity": "Akkustand (%)",
-              "battery_voltage_entity": "Akkuspannung",
-              "battery_temperature_entity": "Akkutemperatur",
-              "battery_power_entity": "Lade-/Entladeleistung",
-              "battery_invert": "Vorzeichen umkehren"
-            },
-            "data_description": {
-              "battery_power_entity": "Ein Sensor mit Vorzeichen: positiv = Laden, negativ = Entladen.",
-              "battery_invert": "Einschalten, wenn dein Sensor beim Entladen positive Werte meldet."
-            }
-          }
         },
         "data_description": {
           "house_power_entity": "Sensor mit dem aktuellen Verbrauch deines Hauses in W oder kW. Wird für den Energiefluss im Dashboard genutzt."
@@ -165,6 +131,99 @@
       },
       "grid_power": {
         "name": "Netzleistung"
+      },
+      "string_power": {
+        "name": "Leistung"
+      },
+      "string_today": {
+        "name": "Produktion heute"
+      },
+      "string_total": {
+        "name": "Produktion gesamt"
+      },
+      "string_voltage": {
+        "name": "Spannung"
+      },
+      "string_current": {
+        "name": "Strom"
+      }
+    }
+  },
+  "config_subentries": {
+    "battery": {
+      "entry_type": "Akku",
+      "initiate_flow": {
+        "user": "Akku hinzufügen",
+        "reconfigure": "Akku bearbeiten"
+      },
+      "step": {
+        "user": {
+          "title": "Akku hinzufügen",
+          "data": {
+            "name": "Name",
+            "battery_soc_entity": "Akkustand (%)",
+            "battery_power_entity": "Lade-/Entladeleistung",
+            "battery_invert": "Vorzeichen umkehren",
+            "battery_capacity": "Kapazität",
+            "battery_voltage_entity": "Akkuspannung",
+            "battery_temperature_entity": "Akkutemperatur"
+          },
+          "data_description": {
+            "battery_power_entity": "Ein Sensor mit Vorzeichen: positiv = Laden, negativ = Entladen.",
+            "battery_invert": "Einschalten, wenn dein Sensor beim Entladen positive Werte meldet.",
+            "battery_capacity": "Optional. Gewichtet den gemeinsamen Akkustand, wenn du mehrere Akkus hast."
+          }
+        },
+        "reconfigure": {
+          "title": "Akku bearbeiten",
+          "data": {
+            "name": "Name",
+            "battery_soc_entity": "Akkustand (%)",
+            "battery_power_entity": "Lade-/Entladeleistung",
+            "battery_invert": "Vorzeichen umkehren",
+            "battery_capacity": "Kapazität",
+            "battery_voltage_entity": "Akkuspannung",
+            "battery_temperature_entity": "Akkutemperatur"
+          },
+          "data_description": {
+            "battery_power_entity": "Ein Sensor mit Vorzeichen: positiv = Laden, negativ = Entladen.",
+            "battery_invert": "Einschalten, wenn dein Sensor beim Entladen positive Werte meldet.",
+            "battery_capacity": "Optional. Gewichtet den gemeinsamen Akkustand, wenn du mehrere Akkus hast."
+          }
+        }
+      }
+    },
+    "string": {
+      "entry_type": "PV-String",
+      "initiate_flow": {
+        "user": "String hinzufügen",
+        "reconfigure": "String bearbeiten"
+      },
+      "step": {
+        "user": {
+          "title": "String hinzufügen",
+          "data": {
+            "name": "Name",
+            "string_power_entity": "Leistung des Strings",
+            "string_voltage_entity": "Spannung (optional)",
+            "string_current_entity": "Strom (optional)"
+          },
+          "data_description": {
+            "string_power_entity": "Sensor mit der aktuellen Leistung dieses Strings in W oder kW."
+          }
+        },
+        "reconfigure": {
+          "title": "String bearbeiten",
+          "data": {
+            "name": "Name",
+            "string_power_entity": "Leistung des Strings",
+            "string_voltage_entity": "Spannung (optional)",
+            "string_current_entity": "Strom (optional)"
+          },
+          "data_description": {
+            "string_power_entity": "Sensor mit der aktuellen Leistung dieses Strings in W oder kW."
+          }
+        }
       }
     }
   }
