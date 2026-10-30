@@ -356,6 +356,13 @@ class PVTracker:
             return 0.0
         return self.data["day_kwh"] * 1000 / hours
 
+    @property
+    def grid_power(self) -> float | None:
+        """Netzleistung in W: positiv = Bezug, negativ = Einspeisung (Haus + Akku-Laden − PV)."""
+        if self.house_power is None or self.current_power is None:
+            return None
+        return self.house_power + (self.battery_power or 0.0) - self.current_power
+
     def best_day(self) -> tuple[float, str | None]:
         """Bester Tag inklusive des laufenden Tages."""
         if self.data["day_kwh"] > self.data["best_day_kwh"]:

@@ -212,6 +212,18 @@ HOUSE_SENSORS: tuple[PVSensorDescription, ...] = (
     ),
     _energy("house_today", "house_day_kwh", SensorStateClass.TOTAL_INCREASING, icon="mdi:home-lightning-bolt-outline"),
     _energy("house_total", "house_total_kwh", SensorStateClass.TOTAL_INCREASING, icon="mdi:home-lightning-bolt-outline"),
+    # Berechnet: positiv = Bezug aus dem Netz, negativ = Einspeisung
+    PVSensorDescription(
+        key="grid_power",
+        translation_key="grid_power",
+        device_class=SensorDeviceClass.POWER,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
+        icon="mdi:transmission-tower",
+        realtime=True,
+        value_fn=lambda t: None if (grid := t.grid_power) is None else round(grid, 1),
+    ),
 )
 
 
