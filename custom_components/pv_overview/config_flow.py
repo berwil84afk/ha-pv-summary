@@ -15,6 +15,7 @@ from homeassistant.helpers import selector
 from .const import (
     BATTERY_ENTITY_KEYS,
     CONF_BATTERY_INVERT,
+    CONF_HOUSE_POWER,
     CONF_INITIAL_TOTAL,
     CONF_SOURCE,
     CONF_THRESHOLD,
@@ -48,6 +49,7 @@ def _battery_section(config: dict[str, Any]) -> section:
 def _flatten(user_input: dict[str, Any]) -> dict[str, Any]:
     """Akku-Abschnitt in flache Werte umwandeln; leere Felder werden zu None."""
     data = {key: value for key, value in user_input.items() if key != SECTION_BATTERY}
+    data[CONF_HOUSE_POWER] = user_input.get(CONF_HOUSE_POWER) or None
     battery = user_input.get(SECTION_BATTERY, {})
     for key in BATTERY_ENTITY_KEYS:
         data[key] = battery.get(key) or None
@@ -70,6 +72,7 @@ class PVOverviewConfigFlow(ConfigFlow, domain=DOMAIN):
             {
                 vol.Required(CONF_NAME, default=DEFAULT_NAME): selector.TextSelector(),
                 vol.Required(CONF_SOURCE): SOURCE_SELECTOR,
+                vol.Optional(CONF_HOUSE_POWER): SOURCE_SELECTOR,
                 vol.Required(CONF_THRESHOLD, default=DEFAULT_THRESHOLD): THRESHOLD_SELECTOR,
                 vol.Required(CONF_INITIAL_TOTAL, default=0): selector.NumberSelector(
                     selector.NumberSelectorConfig(
@@ -102,6 +105,9 @@ class PVOverviewOptionsFlow(OptionsFlow):
         schema = vol.Schema(
             {
                 vol.Required(CONF_SOURCE, default=config[CONF_SOURCE]): SOURCE_SELECTOR,
+                vol.Optional(
+                    CONF_HOUSE_POWER, description={"suggested_value": config.get(CONF_HOUSE_POWER)}
+                ): SOURCE_SELECTOR,
                 vol.Required(
                     CONF_THRESHOLD, default=config.get(CONF_THRESHOLD, DEFAULT_THRESHOLD)
                 ): THRESHOLD_SELECTOR,

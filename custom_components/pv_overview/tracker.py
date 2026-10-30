@@ -24,6 +24,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_BATTERY_INVERT,
     CONF_BATTERY_POWER,
+    CONF_HOUSE_POWER,
     CONF_INITIAL_TOTAL,
     CONF_SOURCE,
     CONF_THRESHOLD,
@@ -43,7 +44,7 @@ _LOGGER = logging.getLogger(__name__)
 
 UNIT_FACTORS = {"W": 1.0, "kW": 1_000.0, "MW": 1_000_000.0}
 PERIOD_KEYS = ("total_kwh", "day_kwh", "week_kwh", "month_kwh", "year_kwh")
-BATTERY_DAY_KEYS = ("bat_charge_day_kwh", "bat_discharge_day_kwh")
+EXTRA_DAY_KEYS = ("bat_charge_day_kwh", "bat_discharge_day_kwh", "house_day_kwh")
 
 
 def _default_data(initial_total: float) -> dict[str, Any]:
@@ -72,6 +73,8 @@ def _default_data(initial_total: float) -> dict[str, Any]:
         "bat_discharge_day_kwh": 0.0,
         "bat_charge_total_kwh": 0.0,
         "bat_discharge_total_kwh": 0.0,
+        "house_day_kwh": 0.0,
+        "house_total_kwh": 0.0,
     }
 
 
@@ -109,6 +112,11 @@ class PVTracker:
         self._battery_sign = -1.0 if config.get(CONF_BATTERY_INVERT) else 1.0
         self.battery_power: float | None = None
         self._battery_last_time: datetime | None = None
+
+        # Hausverbrauch in W
+        self.house_power_entity: str | None = config.get(CONF_HOUSE_POWER)
+        self.house_power: float | None = None
+        self._house_last_time: datetime | None = None
 
         self._store: Store[dict[str, Any]] = Store(
             hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}"
@@ -148,6 +156,15 @@ class PVTracker:
             self._unsubs.append(
                 async_track_state_change_event(
                     self.hass, [self.battery_power_entity], self._async_battery_changed
+                )
+            )
+        if self.house_power_entity:
+            self._set_house_power(
+                self.hass.states.get(self.house_power_entity), dt_util.utcnow()
+            )
+            self._unsubs.append(
+                async_track_state_change_event(
+                    self.hass, [self.house_power_entity], self._async_house_changed
                 )
             )
 
@@ -191,6 +208,14 @@ class PVTracker:
             listener()
 
     @callback
+    def _async_house_changed(self, event: Event[EventStateChangedData]) -> None:
+        now = dt_util.utcnow()
+        self._integrate(now)
+        self._set_house_power(event.data["new_state"], now)
+        for listener in list(self._realtime_listeners):
+            listener()
+
+    @callback
     def _async_tick(self, _now: datetime) -> None:
         self._integrate(dt_util.utcnow())
         self._store.async_delay_save(lambda: self.data, SAVE_DELAY)
@@ -219,6 +244,13 @@ class PVTracker:
                 self.data[f"{prefix}_day_kwh"] += kwh
                 self.data[f"{prefix}_total_kwh"] += kwh
             self._battery_last_time = now
+        if self.house_power is not None and self._house_last_time is not None:
+            seconds = (now - self._house_last_time).total_seconds()
+            if seconds > 0:
+                kwh = self.house_power * seconds / 3_600_000
+                self.data["house_day_kwh"] += kwh
+                self.data["house_total_kwh"] += kwh
+            self._house_last_time = now
         self._check_rollover(dt_util.as_local(now))
 
     @callback
@@ -226,6 +258,12 @@ class PVTracker:
         power = _parse_watts(state)
         self.battery_power = None if power is None else power * self._battery_sign
         self._battery_last_time = now if power is not None else None
+
+    @callback
+    def _set_house_power(self, state: State | None, now: datetime) -> None:
+        power = _parse_power(state)
+        self.house_power = power
+        self._house_last_time = now if power is not None else None
 
     @callback
     def _set_power(self, state: State | None, now: datetime) -> None:
@@ -274,8 +312,8 @@ class PVTracker:
         data["day_max_w"] = 0.0
         data["day_max_time"] = None
         data["day_active_s"] = 0.0
-        for bat_key in BATTERY_DAY_KEYS:
-            data[bat_key] = 0.0
+        for extra_key in EXTRA_DAY_KEYS:
+            data[extra_key] = 0.0
 
         if today.isocalendar()[:2] != current.isocalendar()[:2]:
             data["week_kwh"] = 0.0

@@ -197,6 +197,24 @@ BATTERY_SENSORS: tuple[PVSensorDescription, ...] = (
 )
 
 
+# Nur angelegt, wenn ein Hausverbrauchs-Sensor konfiguriert ist
+HOUSE_SENSORS: tuple[PVSensorDescription, ...] = (
+    PVSensorDescription(
+        key="house_power",
+        translation_key="house_power",
+        device_class=SensorDeviceClass.POWER,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
+        icon="mdi:home-lightning-bolt",
+        realtime=True,
+        value_fn=lambda t: None if t.house_power is None else round(t.house_power, 1),
+    ),
+    _energy("house_today", "house_day_kwh", SensorStateClass.TOTAL_INCREASING, icon="mdi:home-lightning-bolt-outline"),
+    _energy("house_total", "house_total_kwh", SensorStateClass.TOTAL_INCREASING, icon="mdi:home-lightning-bolt-outline"),
+)
+
+
 @dataclass(frozen=True, kw_only=True)
 class PVMirrorDescription(SensorEntityDescription):
     """Sensor, der einen konfigurierten Akku-Sensor 1:1 übernimmt."""
@@ -251,7 +269,11 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     tracker = entry.runtime_data
-    descriptions = SENSORS + (BATTERY_SENSORS if tracker.battery_power_entity else ())
+    descriptions = (
+        SENSORS
+        + (BATTERY_SENSORS if tracker.battery_power_entity else ())
+        + (HOUSE_SENSORS if tracker.house_power_entity else ())
+    )
     entities: list[SensorEntity] = [PVOverviewSensor(tracker, entry, desc) for desc in descriptions]
     entities += [
         PVMirrorSensor(tracker, entry, desc, source)
