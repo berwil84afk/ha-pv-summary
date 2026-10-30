@@ -7,12 +7,14 @@
         "data": {
           "name": "Name",
           "source_entity": "PV-Leistungssensor",
+          "house_power_entity": "Hausverbrauch (optional)",
           "threshold": "Schwelle für Produktionszeit",
           "initial_total": "Startwert Gesamtproduktion"
         },
         "data_description": {
           "threshold": "Ab dieser Leistung zählt die Zeit als Produktionszeit.",
-          "initial_total": "Optional: bisherige Gesamtproduktion deiner Anlage in kWh."
+          "initial_total": "Optional: bisherige Gesamtproduktion deiner Anlage in kWh.",
+          "house_power_entity": "Sensor mit dem aktuellen Verbrauch deines Hauses in W oder kW. Wird für den Energiefluss im Dashboard genutzt."
         },
         "sections": {
           "battery": {
@@ -43,6 +45,7 @@
         "title": "PV Summary – Optionen",
         "data": {
           "source_entity": "PV-Leistungssensor",
+          "house_power_entity": "Hausverbrauch (optional)",
           "threshold": "Schwelle für Produktionszeit"
         },
         "sections": {
@@ -61,39 +64,105 @@
               "battery_invert": "Einschalten, wenn dein Sensor beim Entladen positive Werte meldet."
             }
           }
+        },
+        "data_description": {
+          "house_power_entity": "Sensor mit dem aktuellen Verbrauch deines Hauses in W oder kW. Wird für den Energiefluss im Dashboard genutzt."
         }
       }
     }
   },
   "entity": {
     "sensor": {
-      "power": { "name": "Aktuelle Leistung" },
-      "total": { "name": "Gesamtproduktion" },
-      "today": { "name": "Produktion heute" },
-      "yesterday": { "name": "Produktion gestern" },
-      "week": { "name": "Produktion diese Woche" },
-      "month": { "name": "Produktion dieser Monat" },
-      "last_month": { "name": "Produktion letzter Monat" },
-      "year": { "name": "Produktion dieses Jahr" },
-      "max_power_today": { "name": "Spitzenleistung heute" },
-      "max_power_alltime": { "name": "Spitzenleistung Rekord" },
-      "avg_power_today": { "name": "Durchschnittsleistung heute" },
-      "production_time_today": { "name": "Produktionszeit heute" },
-      "avg_daily_7": { "name": "Ø Tagesproduktion 7 Tage" },
-      "avg_daily_30": { "name": "Ø Tagesproduktion 30 Tage" },
-      "avg_daily_365": { "name": "Ø Tagesproduktion 365 Tage" },
-      "avg_daily_total": { "name": "Ø Tagesproduktion gesamt" },
-      "best_day": { "name": "Bester Tag" },
-      "battery_soc": { "name": "Akkustand" },
-      "battery_voltage": { "name": "Akkuspannung" },
-      "battery_temperature": { "name": "Akkutemperatur" },
-      "battery_power": { "name": "Akkuleistung" },
-      "battery_charge_power": { "name": "Akku Ladeleistung" },
-      "battery_discharge_power": { "name": "Akku Entladeleistung" },
-      "battery_charged_today": { "name": "Akku geladen heute" },
-      "battery_discharged_today": { "name": "Akku entladen heute" },
-      "battery_charged_total": { "name": "Akku geladen gesamt" },
-      "battery_discharged_total": { "name": "Akku entladen gesamt" }
+      "power": {
+        "name": "Aktuelle Leistung"
+      },
+      "total": {
+        "name": "Gesamtproduktion"
+      },
+      "today": {
+        "name": "Produktion heute"
+      },
+      "yesterday": {
+        "name": "Produktion gestern"
+      },
+      "week": {
+        "name": "Produktion diese Woche"
+      },
+      "month": {
+        "name": "Produktion dieser Monat"
+      },
+      "last_month": {
+        "name": "Produktion letzter Monat"
+      },
+      "year": {
+        "name": "Produktion dieses Jahr"
+      },
+      "max_power_today": {
+        "name": "Spitzenleistung heute"
+      },
+      "max_power_alltime": {
+        "name": "Spitzenleistung Rekord"
+      },
+      "avg_power_today": {
+        "name": "Durchschnittsleistung heute"
+      },
+      "production_time_today": {
+        "name": "Produktionszeit heute"
+      },
+      "avg_daily_7": {
+        "name": "Ø Tagesproduktion 7 Tage"
+      },
+      "avg_daily_30": {
+        "name": "Ø Tagesproduktion 30 Tage"
+      },
+      "avg_daily_365": {
+        "name": "Ø Tagesproduktion 365 Tage"
+      },
+      "avg_daily_total": {
+        "name": "Ø Tagesproduktion gesamt"
+      },
+      "best_day": {
+        "name": "Bester Tag"
+      },
+      "battery_soc": {
+        "name": "Akkustand"
+      },
+      "battery_voltage": {
+        "name": "Akkuspannung"
+      },
+      "battery_temperature": {
+        "name": "Akkutemperatur"
+      },
+      "battery_power": {
+        "name": "Akkuleistung"
+      },
+      "battery_charge_power": {
+        "name": "Akku Ladeleistung"
+      },
+      "battery_discharge_power": {
+        "name": "Akku Entladeleistung"
+      },
+      "battery_charged_today": {
+        "name": "Akku geladen heute"
+      },
+      "battery_discharged_today": {
+        "name": "Akku entladen heute"
+      },
+      "battery_charged_total": {
+        "name": "Akku geladen gesamt"
+      },
+      "battery_discharged_total": {
+        "name": "Akku entladen gesamt"
+      },
+      "house_power": {
+        "name": "Hausverbrauch"
+      },
+      "house_today": {
+        "name": "Hausverbrauch heute"
+      },
+      "house_total": {
+        "name": "Hausverbrauch gesamt"
+      }
     }
   }
 }
