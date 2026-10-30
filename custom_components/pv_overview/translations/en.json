@@ -7,6 +7,8 @@
         "data": {
           "name": "Name",
           "source_entity": "PV power sensor",
+          "grid_power_entity": "Grid power (meter)",
+          "grid_invert": "Invert grid sign",
           "house_power_entity": "House consumption (optional)",
           "threshold": "Production time threshold",
           "initial_total": "Initial total production"
@@ -14,7 +16,9 @@
         "data_description": {
           "threshold": "Time above this power counts as production time.",
           "initial_total": "Optional: previous total production of your system in kWh.",
-          "house_power_entity": "Sensor with the current consumption of your house in W or kW. Used for the energy flow in the dashboard."
+          "house_power_entity": "Only if you have a sensor that really measures the house consumption. Otherwise it is calculated from PV, battery and grid.",
+          "grid_power_entity": "Power at the grid meter: positive = import, negative = export. House consumption is calculated from it.",
+          "grid_invert": "Enable if your meter reports positive values while exporting."
         }
       }
     },
@@ -28,11 +32,15 @@
         "title": "PV Summary options",
         "data": {
           "source_entity": "PV power sensor",
+          "grid_power_entity": "Grid power (meter)",
+          "grid_invert": "Invert grid sign",
           "house_power_entity": "House consumption (optional)",
           "threshold": "Production time threshold"
         },
         "data_description": {
-          "house_power_entity": "Sensor with the current consumption of your house in W or kW. Used for the energy flow in the dashboard."
+          "house_power_entity": "Only if you have a sensor that really measures the house consumption. Otherwise it is calculated from PV, battery and grid.",
+          "grid_power_entity": "Power at the grid meter: positive = import, negative = export. House consumption is calculated from it.",
+          "grid_invert": "Enable if your meter reports positive values while exporting."
         }
       }
     }
@@ -146,6 +154,18 @@
       },
       "string_current": {
         "name": "Current"
+      },
+      "grid_import_today": {
+        "name": "Grid import today"
+      },
+      "grid_export_today": {
+        "name": "Grid export today"
+      },
+      "grid_import_total": {
+        "name": "Grid import total"
+      },
+      "grid_export_total": {
+        "name": "Grid export total"
       }
     }
   },

@@ -7,6 +7,8 @@
         "data": {
           "name": "Name",
           "source_entity": "PV-Leistungssensor",
+          "grid_power_entity": "Netzleistung (Zähler)",
+          "grid_invert": "Vorzeichen Netz umkehren",
           "house_power_entity": "Hausverbrauch (optional)",
           "threshold": "Schwelle für Produktionszeit",
           "initial_total": "Startwert Gesamtproduktion"
@@ -14,7 +16,9 @@
         "data_description": {
           "threshold": "Ab dieser Leistung zählt die Zeit als Produktionszeit.",
           "initial_total": "Optional: bisherige Gesamtproduktion deiner Anlage in kWh.",
-          "house_power_entity": "Sensor mit dem aktuellen Verbrauch deines Hauses in W oder kW. Wird für den Energiefluss im Dashboard genutzt."
+          "house_power_entity": "Nur angeben, wenn du einen Sensor hast, der wirklich den Verbrauch des Hauses misst. Sonst wird er aus PV, Akku und Netz berechnet.",
+          "grid_power_entity": "Leistung am Netz-Zähler: positiv = Bezug, negativ = Einspeisung. Daraus wird der Hausverbrauch berechnet.",
+          "grid_invert": "Einschalten, wenn dein Zähler bei Einspeisung positive Werte meldet."
         }
       }
     },
@@ -28,11 +32,15 @@
         "title": "PV Summary – Optionen",
         "data": {
           "source_entity": "PV-Leistungssensor",
+          "grid_power_entity": "Netzleistung (Zähler)",
+          "grid_invert": "Vorzeichen Netz umkehren",
           "house_power_entity": "Hausverbrauch (optional)",
           "threshold": "Schwelle für Produktionszeit"
         },
         "data_description": {
-          "house_power_entity": "Sensor mit dem aktuellen Verbrauch deines Hauses in W oder kW. Wird für den Energiefluss im Dashboard genutzt."
+          "house_power_entity": "Nur angeben, wenn du einen Sensor hast, der wirklich den Verbrauch des Hauses misst. Sonst wird er aus PV, Akku und Netz berechnet.",
+          "grid_power_entity": "Leistung am Netz-Zähler: positiv = Bezug, negativ = Einspeisung. Daraus wird der Hausverbrauch berechnet.",
+          "grid_invert": "Einschalten, wenn dein Zähler bei Einspeisung positive Werte meldet."
         }
       }
     }
@@ -146,6 +154,18 @@
       },
       "string_current": {
         "name": "Strom"
+      },
+      "grid_import_today": {
+        "name": "Netzbezug heute"
+      },
+      "grid_export_today": {
+        "name": "Einspeisung heute"
+      },
+      "grid_import_total": {
+        "name": "Netzbezug gesamt"
+      },
+      "grid_export_total": {
+        "name": "Einspeisung gesamt"
       }
     }
   },
