@@ -162,6 +162,9 @@
       },
       "house_total": {
         "name": "House consumption total"
+      },
+      "grid_power": {
+        "name": "Grid power"
       }
     }
   }

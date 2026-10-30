@@ -162,6 +162,9 @@
       },
       "house_total": {
         "name": "Hausverbrauch gesamt"
+      },
+      "grid_power": {
+        "name": "Netzleistung"
       }
     }
   }
