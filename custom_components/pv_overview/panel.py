@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,8 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
 from .const import CONF_THRESHOLD, DEFAULT_THRESHOLD, DOMAIN, PANEL_URL, STATIC_URL, VERSION
+
+_LOGGER = logging.getLogger(__name__)
 
 FRONTEND_DIR = Path(__file__).parent / "frontend"
 
@@ -29,15 +32,20 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
         store["static_registered"] = True
     if store.get("panel_registered"):
         return
-    await panel_custom.async_register_panel(
-        hass,
-        frontend_url_path=PANEL_URL,
-        webcomponent_name="pv-summary-panel",
-        sidebar_title="PV Summary",
-        sidebar_icon="mdi:solar-power-variant",
-        module_url=f"{STATIC_URL}/pv-summary-panel.js?v={VERSION}",
-        require_admin=False,
-    )
+    try:
+        await panel_custom.async_register_panel(
+            hass,
+            frontend_url_path=PANEL_URL,
+            webcomponent_name="pv-summary-panel",
+            sidebar_title="PV Summary",
+            sidebar_icon="mdi:solar-power-variant",
+            module_url=f"{STATIC_URL}/pv-summary-panel.js?v={VERSION}",
+            require_admin=False,
+        )
+    except ValueError as err:
+        # Ein fehlendes Panel darf die Sensoren nicht verhindern
+        _LOGGER.warning("Dashboard-Panel '%s' konnte nicht angelegt werden: %s", PANEL_URL, err)
+        return
     store["panel_registered"] = True
 
 

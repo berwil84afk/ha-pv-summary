@@ -10,8 +10,9 @@ CONF_INITIAL_TOTAL = "initial_total"
 CONF_HOUSE_POWER = "house_power_entity"  # optional: aktueller Hausverbrauch
 
 # Eigenes Dashboard (Panel in der Seitenleiste)
-VERSION = "1.4.0"
-PANEL_URL = "pv-summary"
+VERSION = "1.4.1"
+# Eigene Adresse, damit sie nicht mit einem Lovelace-Dashboard "pv-summary" kollidiert
+PANEL_URL = "pv-summary-panel"
 STATIC_URL = "/pv_summary_static"
 
 # Optionaler Akku
