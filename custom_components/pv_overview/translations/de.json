@@ -13,6 +13,23 @@
         "data_description": {
           "threshold": "Ab dieser Leistung zählt die Zeit als Produktionszeit.",
           "initial_total": "Optional: bisherige Gesamtproduktion deiner Anlage in kWh."
+        },
+        "sections": {
+          "battery": {
+            "name": "Akku (optional)",
+            "description": "Nur ausfüllen, wenn ein Batteriespeicher vorhanden ist. Jedes Feld ist einzeln optional.",
+            "data": {
+              "battery_soc_entity": "Akkustand (%)",
+              "battery_voltage_entity": "Akkuspannung",
+              "battery_temperature_entity": "Akkutemperatur",
+              "battery_power_entity": "Lade-/Entladeleistung",
+              "battery_invert": "Vorzeichen umkehren"
+            },
+            "data_description": {
+              "battery_power_entity": "Ein Sensor mit Vorzeichen: positiv = Laden, negativ = Entladen.",
+              "battery_invert": "Einschalten, wenn dein Sensor beim Entladen positive Werte meldet."
+            }
+          }
         }
       }
     },
@@ -27,6 +44,23 @@
         "data": {
           "source_entity": "PV-Leistungssensor",
           "threshold": "Schwelle für Produktionszeit"
+        },
+        "sections": {
+          "battery": {
+            "name": "Akku (optional)",
+            "description": "Feld leeren, um einen Akku-Sensor zu entfernen.",
+            "data": {
+              "battery_soc_entity": "Akkustand (%)",
+              "battery_voltage_entity": "Akkuspannung",
+              "battery_temperature_entity": "Akkutemperatur",
+              "battery_power_entity": "Lade-/Entladeleistung",
+              "battery_invert": "Vorzeichen umkehren"
+            },
+            "data_description": {
+              "battery_power_entity": "Ein Sensor mit Vorzeichen: positiv = Laden, negativ = Entladen.",
+              "battery_invert": "Einschalten, wenn dein Sensor beim Entladen positive Werte meldet."
+            }
+          }
         }
       }
     }
@@ -49,7 +83,17 @@
       "avg_daily_30": { "name": "Ø Tagesproduktion 30 Tage" },
       "avg_daily_365": { "name": "Ø Tagesproduktion 365 Tage" },
       "avg_daily_total": { "name": "Ø Tagesproduktion gesamt" },
-      "best_day": { "name": "Bester Tag" }
+      "best_day": { "name": "Bester Tag" },
+      "battery_soc": { "name": "Akkustand" },
+      "battery_voltage": { "name": "Akkuspannung" },
+      "battery_temperature": { "name": "Akkutemperatur" },
+      "battery_power": { "name": "Akkuleistung" },
+      "battery_charge_power": { "name": "Akku Ladeleistung" },
+      "battery_discharge_power": { "name": "Akku Entladeleistung" },
+      "battery_charged_today": { "name": "Akku geladen heute" },
+      "battery_discharged_today": { "name": "Akku entladen heute" },
+      "battery_charged_total": { "name": "Akku geladen gesamt" },
+      "battery_discharged_total": { "name": "Akku entladen gesamt" }
     }
   }
 }

@@ -13,6 +13,23 @@
         "data_description": {
           "threshold": "Time above this power counts as production time.",
           "initial_total": "Optional: previous total production of your system in kWh."
+        },
+        "sections": {
+          "battery": {
+            "name": "Battery (optional)",
+            "description": "Only fill in if you have a battery storage. Every field is optional.",
+            "data": {
+              "battery_soc_entity": "State of charge (%)",
+              "battery_voltage_entity": "Battery voltage",
+              "battery_temperature_entity": "Battery temperature",
+              "battery_power_entity": "Charge/discharge power",
+              "battery_invert": "Invert sign"
+            },
+            "data_description": {
+              "battery_power_entity": "One signed sensor: positive = charging, negative = discharging.",
+              "battery_invert": "Enable if your sensor reports positive values while discharging."
+            }
+          }
         }
       }
     },
@@ -27,6 +44,23 @@
         "data": {
           "source_entity": "PV power sensor",
           "threshold": "Production time threshold"
+        },
+        "sections": {
+          "battery": {
+            "name": "Battery (optional)",
+            "description": "Clear a field to remove that battery sensor.",
+            "data": {
+              "battery_soc_entity": "State of charge (%)",
+              "battery_voltage_entity": "Battery voltage",
+              "battery_temperature_entity": "Battery temperature",
+              "battery_power_entity": "Charge/discharge power",
+              "battery_invert": "Invert sign"
+            },
+            "data_description": {
+              "battery_power_entity": "One signed sensor: positive = charging, negative = discharging.",
+              "battery_invert": "Enable if your sensor reports positive values while discharging."
+            }
+          }
         }
       }
     }
@@ -49,7 +83,17 @@
       "avg_daily_30": { "name": "Avg daily production 30 days" },
       "avg_daily_365": { "name": "Avg daily production 365 days" },
       "avg_daily_total": { "name": "Avg daily production overall" },
-      "best_day": { "name": "Best day" }
+      "best_day": { "name": "Best day" },
+      "battery_soc": { "name": "Battery level" },
+      "battery_voltage": { "name": "Battery voltage" },
+      "battery_temperature": { "name": "Battery temperature" },
+      "battery_power": { "name": "Battery power" },
+      "battery_charge_power": { "name": "Battery charging power" },
+      "battery_discharge_power": { "name": "Battery discharging power" },
+      "battery_charged_today": { "name": "Battery charged today" },
+      "battery_discharged_today": { "name": "Battery discharged today" },
+      "battery_charged_total": { "name": "Battery charged total" },
+      "battery_discharged_total": { "name": "Battery discharged total" }
     }
   }
 }
