@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 import logging
 from typing import TYPE_CHECKING, Any
@@ -22,11 +23,18 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_BATTERY_CAPACITY,
     CONF_BATTERY_INVERT,
     CONF_BATTERY_POWER,
+    CONF_BATTERY_SOC,
+    CONF_BATTERY_TEMPERATURE,
+    CONF_BATTERY_VOLTAGE,
     CONF_HOUSE_POWER,
     CONF_INITIAL_TOTAL,
     CONF_SOURCE,
+    CONF_STRING_CURRENT,
+    CONF_STRING_POWER,
+    CONF_STRING_VOLTAGE,
     CONF_THRESHOLD,
     DEFAULT_THRESHOLD,
     DOMAIN,
@@ -34,6 +42,8 @@ from .const import (
     HISTORY_MONTHS,
     SAVE_DELAY,
     STORAGE_VERSION,
+    SUBENTRY_BATTERY,
+    SUBENTRY_STRING,
     UPDATE_INTERVAL,
 )
 
@@ -69,12 +79,16 @@ def _default_data(initial_total: float) -> dict[str, Any]:
         "start_date": None,
         "history": {},  # "YYYY-MM-DD" -> kWh
         "months": {},  # "YYYY-MM" -> kWh
+        # Summe aller Akkus
         "bat_charge_day_kwh": 0.0,
         "bat_discharge_day_kwh": 0.0,
         "bat_charge_total_kwh": 0.0,
         "bat_discharge_total_kwh": 0.0,
         "house_day_kwh": 0.0,
         "house_total_kwh": 0.0,
+        # Je Unter-Eintrag: subentry_id -> Zähler
+        "batteries": {},
+        "strings": {},
     }
 
 
@@ -95,6 +109,44 @@ def _parse_power(state: State | None) -> float | None:
     return None if power is None else max(power, 0.0)
 
 
+def _parse_float(state: State | None) -> float | None:
+    if state is None or state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+        return None
+    try:
+        return float(state.state)
+    except ValueError:
+        return None
+
+
+@dataclass
+class Battery:
+    """Ein Akku aus einem Unter-Eintrag; Leistung in W, positiv = Laden."""
+
+    sub_id: str
+    title: str
+    power_entity: str | None
+    soc_entity: str | None
+    voltage_entity: str | None
+    temperature_entity: str | None
+    capacity: float | None
+    sign: float = 1.0
+    power: float | None = None
+    last_time: datetime | None = None
+
+
+@dataclass
+class PVString:
+    """Ein PV-String aus einem Unter-Eintrag."""
+
+    sub_id: str
+    title: str
+    power_entity: str
+    voltage_entity: str | None
+    current_entity: str | None
+    power: float | None = None
+    last_time: datetime | None = None
+
+
 class PVTracker:
     """Hält alle Zähler und benachrichtigt die Sensoren."""
 
@@ -107,11 +159,28 @@ class PVTracker:
         self.data = _default_data(float(entry.data.get(CONF_INITIAL_TOTAL, 0.0)))
         self.current_power: float | None = None
 
-        # Akku: Leistung in W, positiv = Laden
-        self.battery_power_entity: str | None = config.get(CONF_BATTERY_POWER)
-        self._battery_sign = -1.0 if config.get(CONF_BATTERY_INVERT) else 1.0
-        self.battery_power: float | None = None
-        self._battery_last_time: datetime | None = None
+        self.batteries: dict[str, Battery] = {}
+        self.strings: dict[str, PVString] = {}
+        for sub in entry.subentries.values():
+            if sub.subentry_type == SUBENTRY_BATTERY:
+                self.batteries[sub.subentry_id] = Battery(
+                    sub_id=sub.subentry_id,
+                    title=sub.title,
+                    power_entity=sub.data.get(CONF_BATTERY_POWER),
+                    soc_entity=sub.data.get(CONF_BATTERY_SOC),
+                    voltage_entity=sub.data.get(CONF_BATTERY_VOLTAGE),
+                    temperature_entity=sub.data.get(CONF_BATTERY_TEMPERATURE),
+                    capacity=sub.data.get(CONF_BATTERY_CAPACITY) or None,
+                    sign=-1.0 if sub.data.get(CONF_BATTERY_INVERT) else 1.0,
+                )
+            elif sub.subentry_type == SUBENTRY_STRING:
+                self.strings[sub.subentry_id] = PVString(
+                    sub_id=sub.subentry_id,
+                    title=sub.title,
+                    power_entity=sub.data[CONF_STRING_POWER],
+                    voltage_entity=sub.data.get(CONF_STRING_VOLTAGE),
+                    current_entity=sub.data.get(CONF_STRING_CURRENT),
+                )
 
         # Hausverbrauch in W
         self.house_power_entity: str | None = config.get(CONF_HOUSE_POWER)
@@ -125,12 +194,31 @@ class PVTracker:
         self._listeners: list[Callable[[], None]] = []
         self._realtime_listeners: list[Callable[[], None]] = []
         self._unsubs: list[Callable[[], None]] = []
+        # Entity-ID der Quelle -> Funktion, die den neuen Zustand übernimmt
+        self._setters: dict[str, Callable[[State | None, datetime], None]] = {}
+
+    @property
+    def has_battery_power(self) -> bool:
+        return any(b.power_entity for b in self.batteries.values())
+
+    @property
+    def has_battery_soc(self) -> bool:
+        return any(b.soc_entity for b in self.batteries.values())
 
     # ------------------------------------------------------------------ Lifecycle
 
     async def async_start(self) -> None:
         if stored := await self._store.async_load():
             self.data.update(stored)
+        for sub_id in self.batteries:
+            self.data["batteries"].setdefault(sub_id, {"charge_day": 0.0, "discharge_day": 0.0, "charge_total": 0.0, "discharge_total": 0.0})
+        for sub_id in self.strings:
+            self.data["strings"].setdefault(sub_id, {"day": 0.0, "total": 0.0})
+        # Zähler gelöschter Akkus/Strings verwerfen
+        for key, known in (("batteries", self.batteries), ("strings", self.strings)):
+            for sub_id in list(self.data[key]):
+                if sub_id not in known:
+                    del self.data[key][sub_id]
 
         today = dt_util.now().date().isoformat()
         if self.data["date"] is None:
@@ -138,35 +226,28 @@ class PVTracker:
             self.data["date"] = self.data["start_date"] = today
         self._check_rollover(dt_util.now())
 
-        self._set_power(self.hass.states.get(self.source_entity), dt_util.utcnow())
+        self._setters[self.source_entity] = self._set_power
+        if self.house_power_entity:
+            self._setters[self.house_power_entity] = self._set_house_power
+        for battery in self.batteries.values():
+            if battery.power_entity:
+                self._setters[battery.power_entity] = self._battery_setter(battery)
+        for pv_string in self.strings.values():
+            self._setters[pv_string.power_entity] = self._string_setter(pv_string)
+
+        now = dt_util.utcnow()
+        for entity_id, setter in self._setters.items():
+            setter(self.hass.states.get(entity_id), now)
 
         self._unsubs = [
             async_track_state_change_event(
-                self.hass, [self.source_entity], self._async_source_changed
+                self.hass, list(self._setters), self._async_source_changed
             ),
             async_track_time_interval(self.hass, self._async_tick, UPDATE_INTERVAL),
             async_track_time_change(
                 self.hass, self._async_tick, hour=0, minute=0, second=0
             ),
         ]
-        if self.battery_power_entity:
-            self._set_battery_power(
-                self.hass.states.get(self.battery_power_entity), dt_util.utcnow()
-            )
-            self._unsubs.append(
-                async_track_state_change_event(
-                    self.hass, [self.battery_power_entity], self._async_battery_changed
-                )
-            )
-        if self.house_power_entity:
-            self._set_house_power(
-                self.hass.states.get(self.house_power_entity), dt_util.utcnow()
-            )
-            self._unsubs.append(
-                async_track_state_change_event(
-                    self.hass, [self.house_power_entity], self._async_house_changed
-                )
-            )
 
     async def async_stop(self) -> None:
         for unsub in self._unsubs:
@@ -179,7 +260,7 @@ class PVTracker:
     def async_add_listener(
         self, listener: Callable[[], None], realtime: bool = False
     ) -> Callable[[], None]:
-        """Listener registrieren; realtime = zusätzlich bei jeder Änderung der Quelle."""
+        """Listener registrieren; realtime = zusätzlich bei jeder Änderung einer Quelle."""
         listeners = self._realtime_listeners if realtime else self._listeners
         listeners.append(listener)
 
@@ -193,25 +274,12 @@ class PVTracker:
 
     @callback
     def _async_source_changed(self, event: Event[EventStateChangedData]) -> None:
+        setter = self._setters.get(event.data["entity_id"])
+        if setter is None:
+            return
         now = dt_util.utcnow()
         self._integrate(now)
-        self._set_power(event.data["new_state"], now)
-        for listener in list(self._realtime_listeners):
-            listener()
-
-    @callback
-    def _async_battery_changed(self, event: Event[EventStateChangedData]) -> None:
-        now = dt_util.utcnow()
-        self._integrate(now)
-        self._set_battery_power(event.data["new_state"], now)
-        for listener in list(self._realtime_listeners):
-            listener()
-
-    @callback
-    def _async_house_changed(self, event: Event[EventStateChangedData]) -> None:
-        now = dt_util.utcnow()
-        self._integrate(now)
-        self._set_house_power(event.data["new_state"], now)
+        setter(event.data["new_state"], now)
         for listener in list(self._realtime_listeners):
             listener()
 
@@ -236,14 +304,27 @@ class PVTracker:
                 if self.current_power >= self.threshold:
                     self.data["day_active_s"] += seconds
             self._last_time = now
-        if self.battery_power is not None and self._battery_last_time is not None:
-            seconds = (now - self._battery_last_time).total_seconds()
-            if seconds > 0 and self.battery_power != 0:
-                kwh = abs(self.battery_power) * seconds / 3_600_000
-                prefix = "bat_charge" if self.battery_power > 0 else "bat_discharge"
-                self.data[f"{prefix}_day_kwh"] += kwh
-                self.data[f"{prefix}_total_kwh"] += kwh
-            self._battery_last_time = now
+        for battery in self.batteries.values():
+            if battery.power is not None and battery.last_time is not None:
+                seconds = (now - battery.last_time).total_seconds()
+                if seconds > 0 and battery.power != 0:
+                    kwh = abs(battery.power) * seconds / 3_600_000
+                    kind = "charge" if battery.power > 0 else "discharge"
+                    own = self.data["batteries"][battery.sub_id]
+                    own[f"{kind}_day"] += kwh
+                    own[f"{kind}_total"] += kwh
+                    self.data[f"bat_{kind}_day_kwh"] += kwh
+                    self.data[f"bat_{kind}_total_kwh"] += kwh
+                battery.last_time = now
+        for pv_string in self.strings.values():
+            if pv_string.power is not None and pv_string.last_time is not None:
+                seconds = (now - pv_string.last_time).total_seconds()
+                if seconds > 0:
+                    kwh = pv_string.power * seconds / 3_600_000
+                    own = self.data["strings"][pv_string.sub_id]
+                    own["day"] += kwh
+                    own["total"] += kwh
+                pv_string.last_time = now
         if self.house_power is not None and self._house_last_time is not None:
             seconds = (now - self._house_last_time).total_seconds()
             if seconds > 0:
@@ -253,11 +334,22 @@ class PVTracker:
             self._house_last_time = now
         self._check_rollover(dt_util.as_local(now))
 
-    @callback
-    def _set_battery_power(self, state: State | None, now: datetime) -> None:
-        power = _parse_watts(state)
-        self.battery_power = None if power is None else power * self._battery_sign
-        self._battery_last_time = now if power is not None else None
+    def _battery_setter(self, battery: Battery) -> Callable[[State | None, datetime], None]:
+        @callback
+        def setter(state: State | None, now: datetime) -> None:
+            power = _parse_watts(state)
+            battery.power = None if power is None else power * battery.sign
+            battery.last_time = now if power is not None else None
+
+        return setter
+
+    def _string_setter(self, pv_string: PVString) -> Callable[[State | None, datetime], None]:
+        @callback
+        def setter(state: State | None, now: datetime) -> None:
+            pv_string.power = _parse_power(state)
+            pv_string.last_time = now if pv_string.power is not None else None
+
+        return setter
 
     @callback
     def _set_house_power(self, state: State | None, now: datetime) -> None:
@@ -314,6 +406,10 @@ class PVTracker:
         data["day_active_s"] = 0.0
         for extra_key in EXTRA_DAY_KEYS:
             data[extra_key] = 0.0
+        for own in data["batteries"].values():
+            own["charge_day"] = own["discharge_day"] = 0.0
+        for own in data["strings"].values():
+            own["day"] = 0.0
 
         if today.isocalendar()[:2] != current.isocalendar()[:2]:
             data["week_kwh"] = 0.0
@@ -355,6 +451,25 @@ class PVTracker:
         if hours < 1 / 60:
             return 0.0
         return self.data["day_kwh"] * 1000 / hours
+
+    @property
+    def battery_power(self) -> float | None:
+        """Summe aller Akkus in W (positiv = Laden), None wenn kein Akku einen Wert liefert."""
+        values = [b.power for b in self.batteries.values() if b.power is not None]
+        return sum(values) if values else None
+
+    def battery_soc(self) -> float | None:
+        """Gemeinsamer Akkustand in %: nach Kapazität gewichtet, sonst einfacher Durchschnitt."""
+        values: list[tuple[float, float | None]] = []
+        for battery in self.batteries.values():
+            if battery.soc_entity and (soc := _parse_float(self.hass.states.get(battery.soc_entity))) is not None:
+                values.append((soc, battery.capacity))
+        if not values:
+            return None
+        if all(capacity for _, capacity in values):
+            total = sum(capacity for _, capacity in values)
+            return sum(soc * capacity for soc, capacity in values) / total
+        return sum(soc for soc, _ in values) / len(values)
 
     @property
     def grid_power(self) -> float | None:

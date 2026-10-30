@@ -10,12 +10,20 @@ CONF_INITIAL_TOTAL = "initial_total"
 CONF_HOUSE_POWER = "house_power_entity"  # optional: aktueller Hausverbrauch
 
 # Eigenes Dashboard (Panel in der Seitenleiste)
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 # Eigene Adresse, damit sie nicht mit einem Lovelace-Dashboard "pv-summary" kollidiert
 PANEL_URL = "pv-summary-panel"
 STATIC_URL = "/pv_summary_static"
 
-# Optionaler Akku
+# Unter-Einträge (Akkus und Strings, beliebig viele)
+SUBENTRY_BATTERY = "battery"
+SUBENTRY_STRING = "string"
+CONF_BATTERY_CAPACITY = "battery_capacity"  # kWh, optional, gewichtet den gemeinsamen Akkustand
+CONF_STRING_POWER = "string_power_entity"
+CONF_STRING_VOLTAGE = "string_voltage_entity"
+CONF_STRING_CURRENT = "string_current_entity"
+
+# Akku-Felder (bis v1.5 direkt in der Integration, seit v1.6 je Akku-Unter-Eintrag)
 SECTION_BATTERY = "battery"
 CONF_BATTERY_SOC = "battery_soc_entity"
 CONF_BATTERY_VOLTAGE = "battery_voltage_entity"

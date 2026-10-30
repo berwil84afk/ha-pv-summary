@@ -13,7 +13,17 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
-from .const import CONF_THRESHOLD, DEFAULT_THRESHOLD, DOMAIN, PANEL_URL, STATIC_URL, VERSION
+from .const import (
+    CONF_BATTERY_CAPACITY,
+    CONF_THRESHOLD,
+    DEFAULT_THRESHOLD,
+    DOMAIN,
+    PANEL_URL,
+    STATIC_URL,
+    SUBENTRY_BATTERY,
+    SUBENTRY_STRING,
+    VERSION,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -67,11 +77,27 @@ def ws_get_config(
     entries = []
     for entry in hass.config_entries.async_loaded_entries(DOMAIN):
         prefix = f"{entry.entry_id}_"
-        entities = {
-            reg_entry.unique_id.removeprefix(prefix): reg_entry.entity_id
-            for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id)
-            if reg_entry.unique_id.startswith(prefix) and not reg_entry.disabled
+        entities: dict[str, str] = {}
+        # Akkus und Strings: Unter-Eintrag -> {Schlüssel: Entity-ID}
+        subs: dict[str, dict[str, Any]] = {
+            sub.subentry_id: {
+                "id": sub.subentry_id,
+                "type": sub.subentry_type,
+                "title": sub.title,
+                "capacity": sub.data.get(CONF_BATTERY_CAPACITY),
+                "entities": {},
+            }
+            for sub in entry.subentries.values()
         }
+        for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
+            if reg_entry.disabled or not reg_entry.unique_id.startswith(prefix):
+                continue
+            key = reg_entry.unique_id.removeprefix(prefix)
+            sub_id = reg_entry.config_subentry_id
+            if sub_id in subs:
+                subs[sub_id]["entities"][key.removeprefix(f"{sub_id}_")] = reg_entry.entity_id
+            elif sub_id is None:
+                entities[key] = reg_entry.entity_id
         config = {**entry.data, **entry.options}
         entries.append(
             {
@@ -79,6 +105,8 @@ def ws_get_config(
                 "title": entry.title,
                 "threshold": config.get(CONF_THRESHOLD, DEFAULT_THRESHOLD),
                 "entities": entities,
+                "batteries": [s for s in subs.values() if s["type"] == SUBENTRY_BATTERY],
+                "strings": [s for s in subs.values() if s["type"] == SUBENTRY_STRING],
             }
         )
     connection.send_result(msg["id"], {"version": VERSION, "entries": entries})

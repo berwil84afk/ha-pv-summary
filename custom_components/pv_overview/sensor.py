@@ -17,6 +17,7 @@ from homeassistant.const import (
     PERCENTAGE,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
+    UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfEnergy,
     UnitOfPower,
@@ -29,8 +30,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.typing import StateType
 
-from .const import CONF_BATTERY_SOC, CONF_BATTERY_TEMPERATURE, CONF_BATTERY_VOLTAGE, DOMAIN
-from .tracker import PVTracker
+from .const import DOMAIN
+from .tracker import Battery, PVString, PVTracker
 
 if TYPE_CHECKING:
     from . import PVConfigEntry
@@ -161,7 +162,7 @@ SENSORS: tuple[PVSensorDescription, ...] = (
 )
 
 
-def _battery_power(key: str, value_fn: Callable[[PVTracker], StateType]) -> PVSensorDescription:
+def _power(key: str, value_fn: Callable[[PVTracker], StateType], icon: str | None = None) -> PVSensorDescription:
     return PVSensorDescription(
         key=key,
         translation_key=key,
@@ -169,99 +170,150 @@ def _battery_power(key: str, value_fn: Callable[[PVTracker], StateType]) -> PVSe
         native_unit_of_measurement=UnitOfPower.WATT,
         state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=0,
+        icon=icon,
         realtime=True,
         value_fn=value_fn,
     )
 
 
-def _charge_power(t: PVTracker) -> StateType:
-    return None if t.battery_power is None else round(max(t.battery_power, 0.0), 1)
+def _rounded(value: float | None, digits: int = 1) -> StateType:
+    return None if value is None else round(value, digits)
 
 
-def _discharge_power(t: PVTracker) -> StateType:
-    return None if t.battery_power is None else round(max(-t.battery_power, 0.0), 1)
-
-
-# Nur angelegt, wenn ein Akku-Leistungssensor konfiguriert ist
+# Summe aller Akkus (an der Anlage); nur angelegt, wenn mindestens ein Akku eine Leistung liefert
 BATTERY_SENSORS: tuple[PVSensorDescription, ...] = (
-    _battery_power(
-        "battery_power",
-        lambda t: None if t.battery_power is None else round(t.battery_power, 1),
-    ),
-    _battery_power("battery_charge_power", _charge_power),
-    _battery_power("battery_discharge_power", _discharge_power),
+    _power("battery_power", lambda t: _rounded(t.battery_power)),
+    _power("battery_charge_power", lambda t: None if t.battery_power is None else _rounded(max(t.battery_power, 0.0))),
+    _power("battery_discharge_power", lambda t: None if t.battery_power is None else _rounded(max(-t.battery_power, 0.0))),
     _energy("battery_charged_today", "bat_charge_day_kwh", SensorStateClass.TOTAL_INCREASING, icon="mdi:battery-arrow-up"),
     _energy("battery_discharged_today", "bat_discharge_day_kwh", SensorStateClass.TOTAL_INCREASING, icon="mdi:battery-arrow-down"),
     _energy("battery_charged_total", "bat_charge_total_kwh", SensorStateClass.TOTAL_INCREASING, icon="mdi:battery-arrow-up-outline"),
     _energy("battery_discharged_total", "bat_discharge_total_kwh", SensorStateClass.TOTAL_INCREASING, icon="mdi:battery-arrow-down-outline"),
 )
 
+# Gemeinsamer Akkustand aller Akkus (nach Kapazität gewichtet)
+BATTERY_SOC_SENSOR = PVSensorDescription(
+    key="battery_soc",
+    translation_key="battery_soc",
+    device_class=SensorDeviceClass.BATTERY,
+    native_unit_of_measurement=PERCENTAGE,
+    state_class=SensorStateClass.MEASUREMENT,
+    suggested_display_precision=0,
+    realtime=True,
+    value_fn=lambda t: _rounded(t.battery_soc()),
+)
+
 
 # Nur angelegt, wenn ein Hausverbrauchs-Sensor konfiguriert ist
 HOUSE_SENSORS: tuple[PVSensorDescription, ...] = (
-    PVSensorDescription(
-        key="house_power",
-        translation_key="house_power",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-        suggested_display_precision=0,
-        icon="mdi:home-lightning-bolt",
-        realtime=True,
-        value_fn=lambda t: None if t.house_power is None else round(t.house_power, 1),
-    ),
+    _power("house_power", lambda t: _rounded(t.house_power), icon="mdi:home-lightning-bolt"),
     _energy("house_today", "house_day_kwh", SensorStateClass.TOTAL_INCREASING, icon="mdi:home-lightning-bolt-outline"),
     _energy("house_total", "house_total_kwh", SensorStateClass.TOTAL_INCREASING, icon="mdi:home-lightning-bolt-outline"),
     # Berechnet: positiv = Bezug aus dem Netz, negativ = Einspeisung
-    PVSensorDescription(
-        key="grid_power",
-        translation_key="grid_power",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-        suggested_display_precision=0,
-        icon="mdi:transmission-tower",
-        realtime=True,
-        value_fn=lambda t: None if (grid := t.grid_power) is None else round(grid, 1),
-    ),
+    _power("grid_power", lambda t: _rounded(t.grid_power), icon="mdi:transmission-tower"),
 )
+
+
+def _battery_sensors(battery: Battery) -> list[PVSensorDescription]:
+    """Sensoren eines einzelnen Akkus (Leistung und Tagesenergie)."""
+    sub = battery.sub_id
+    return [
+        _power("battery_power", lambda t: _rounded(t.batteries[sub].power)),
+        PVSensorDescription(
+            key="battery_charged_today",
+            translation_key="battery_charged_today",
+            device_class=SensorDeviceClass.ENERGY,
+            native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+            state_class=SensorStateClass.TOTAL_INCREASING,
+            suggested_display_precision=2,
+            icon="mdi:battery-arrow-up",
+            value_fn=lambda t: round(t.data["batteries"][sub]["charge_day"], 4),
+        ),
+        PVSensorDescription(
+            key="battery_discharged_today",
+            translation_key="battery_discharged_today",
+            device_class=SensorDeviceClass.ENERGY,
+            native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+            state_class=SensorStateClass.TOTAL_INCREASING,
+            suggested_display_precision=2,
+            icon="mdi:battery-arrow-down",
+            value_fn=lambda t: round(t.data["batteries"][sub]["discharge_day"], 4),
+        ),
+    ]
+
+
+def _string_sensors(pv_string: PVString) -> list[PVSensorDescription]:
+    """Sensoren eines PV-Strings (Leistung, Energie heute und gesamt)."""
+    sub = pv_string.sub_id
+    return [
+        _power("string_power", lambda t: _rounded(t.strings[sub].power), icon="mdi:solar-panel"),
+        PVSensorDescription(
+            key="string_today",
+            translation_key="string_today",
+            device_class=SensorDeviceClass.ENERGY,
+            native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+            state_class=SensorStateClass.TOTAL_INCREASING,
+            suggested_display_precision=2,
+            icon="mdi:solar-power",
+            value_fn=lambda t: round(t.data["strings"][sub]["day"], 4),
+        ),
+        PVSensorDescription(
+            key="string_total",
+            translation_key="string_total",
+            device_class=SensorDeviceClass.ENERGY,
+            native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+            state_class=SensorStateClass.TOTAL_INCREASING,
+            suggested_display_precision=2,
+            icon="mdi:solar-power-variant",
+            value_fn=lambda t: round(t.data["strings"][sub]["total"], 4),
+        ),
+    ]
 
 
 @dataclass(frozen=True, kw_only=True)
 class PVMirrorDescription(SensorEntityDescription):
-    """Sensor, der einen konfigurierten Akku-Sensor 1:1 übernimmt."""
-
-    config_key: str
+    """Sensor, der einen konfigurierten Quell-Sensor 1:1 übernimmt."""
 
 
-MIRROR_SENSORS: tuple[PVMirrorDescription, ...] = (
-    PVMirrorDescription(
-        key="battery_soc",
-        translation_key="battery_soc",
-        config_key=CONF_BATTERY_SOC,
-        device_class=SensorDeviceClass.BATTERY,
-        native_unit_of_measurement=PERCENTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        suggested_display_precision=0,
-    ),
-    PVMirrorDescription(
-        key="battery_voltage",
-        translation_key="battery_voltage",
-        config_key=CONF_BATTERY_VOLTAGE,
-        device_class=SensorDeviceClass.VOLTAGE,
-        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
-        state_class=SensorStateClass.MEASUREMENT,
-        suggested_display_precision=2,
-    ),
-    PVMirrorDescription(
-        key="battery_temperature",
-        translation_key="battery_temperature",
-        config_key=CONF_BATTERY_TEMPERATURE,
-        device_class=SensorDeviceClass.TEMPERATURE,
-        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
-        state_class=SensorStateClass.MEASUREMENT,
-        suggested_display_precision=1,
-    ),
+MIRROR_SOC = PVMirrorDescription(
+    key="battery_soc",
+    translation_key="battery_soc",
+    device_class=SensorDeviceClass.BATTERY,
+    native_unit_of_measurement=PERCENTAGE,
+    state_class=SensorStateClass.MEASUREMENT,
+    suggested_display_precision=0,
+)
+MIRROR_VOLTAGE = PVMirrorDescription(
+    key="battery_voltage",
+    translation_key="battery_voltage",
+    device_class=SensorDeviceClass.VOLTAGE,
+    native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+    state_class=SensorStateClass.MEASUREMENT,
+    suggested_display_precision=2,
+)
+MIRROR_TEMPERATURE = PVMirrorDescription(
+    key="battery_temperature",
+    translation_key="battery_temperature",
+    device_class=SensorDeviceClass.TEMPERATURE,
+    native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+    state_class=SensorStateClass.MEASUREMENT,
+    suggested_display_precision=1,
+)
+MIRROR_STRING_VOLTAGE = PVMirrorDescription(
+    key="string_voltage",
+    translation_key="string_voltage",
+    device_class=SensorDeviceClass.VOLTAGE,
+    native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+    state_class=SensorStateClass.MEASUREMENT,
+    suggested_display_precision=1,
+)
+MIRROR_STRING_CURRENT = PVMirrorDescription(
+    key="string_current",
+    translation_key="string_current",
+    device_class=SensorDeviceClass.CURRENT,
+    native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
+    state_class=SensorStateClass.MEASUREMENT,
+    suggested_display_precision=2,
 )
 
 
@@ -275,24 +327,63 @@ def _device_info(entry: PVConfigEntry, tracker: PVTracker) -> DeviceInfo:
     )
 
 
+def _sub_device_info(entry: PVConfigEntry, sub_id: str, title: str, model: str) -> DeviceInfo:
+    """Eigenes Gerät je Akku/String, verknüpft mit der Anlage."""
+    return DeviceInfo(
+        identifiers={(DOMAIN, f"{entry.entry_id}_{sub_id}")},
+        name=title,
+        manufacturer="PV Summary",
+        model=model,
+        entry_type=DeviceEntryType.SERVICE,
+        via_device=(DOMAIN, entry.entry_id),
+    )
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: PVConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     tracker = entry.runtime_data
-    descriptions = (
-        SENSORS
-        + (BATTERY_SENSORS if tracker.battery_power_entity else ())
-        + (HOUSE_SENSORS if tracker.house_power_entity else ())
+    main_device = _device_info(entry, tracker)
+    descriptions: list[PVSensorDescription] = list(SENSORS)
+    if tracker.has_battery_power:
+        descriptions += BATTERY_SENSORS
+    if tracker.has_battery_soc:
+        descriptions.append(BATTERY_SOC_SENSOR)
+    if tracker.house_power_entity:
+        descriptions += HOUSE_SENSORS
+    async_add_entities(
+        PVOverviewSensor(tracker, f"{entry.entry_id}_{desc.key}", main_device, desc) for desc in descriptions
     )
-    entities: list[SensorEntity] = [PVOverviewSensor(tracker, entry, desc) for desc in descriptions]
-    entities += [
-        PVMirrorSensor(tracker, entry, desc, source)
-        for desc in MIRROR_SENSORS
-        if (source := tracker.config.get(desc.config_key))
-    ]
-    async_add_entities(entities)
+
+    # Je Akku und String eigene Sensoren an einem eigenen Gerät
+    for battery in tracker.batteries.values():
+        prefix = f"{entry.entry_id}_{battery.sub_id}_"
+        device = _sub_device_info(entry, battery.sub_id, battery.title, "Akku")
+        entities: list[SensorEntity] = []
+        if battery.power_entity:
+            entities += [PVOverviewSensor(tracker, prefix + d.key, device, d) for d in _battery_sensors(battery)]
+        for desc, source in (
+            (MIRROR_SOC, battery.soc_entity),
+            (MIRROR_VOLTAGE, battery.voltage_entity),
+            (MIRROR_TEMPERATURE, battery.temperature_entity),
+        ):
+            if source:
+                entities.append(PVMirrorSensor(prefix + desc.key, device, desc, source))
+        async_add_entities(entities, config_subentry_id=battery.sub_id)
+
+    for pv_string in tracker.strings.values():
+        prefix = f"{entry.entry_id}_{pv_string.sub_id}_"
+        device = _sub_device_info(entry, pv_string.sub_id, pv_string.title, "PV-String")
+        entities = [PVOverviewSensor(tracker, prefix + d.key, device, d) for d in _string_sensors(pv_string)]
+        for desc, source in (
+            (MIRROR_STRING_VOLTAGE, pv_string.voltage_entity),
+            (MIRROR_STRING_CURRENT, pv_string.current_entity),
+        ):
+            if source:
+                entities.append(PVMirrorSensor(prefix + desc.key, device, desc, source))
+        async_add_entities(entities, config_subentry_id=pv_string.sub_id)
 
 
 class PVOverviewSensor(SensorEntity):
@@ -304,11 +395,13 @@ class PVOverviewSensor(SensorEntity):
     # Verlaufslisten nicht bei jeder Änderung in die Datenbank schreiben
     _unrecorded_attributes = frozenset({"history", "months"})
 
-    def __init__(self, tracker: PVTracker, entry: PVConfigEntry, description: PVSensorDescription) -> None:
+    def __init__(
+        self, tracker: PVTracker, unique_id: str, device_info: DeviceInfo, description: PVSensorDescription
+    ) -> None:
         self.entity_description = description
         self._tracker = tracker
-        self._attr_unique_id = f"{entry.entry_id}_{description.key}"
-        self._attr_device_info = _device_info(entry, tracker)
+        self._attr_unique_id = unique_id
+        self._attr_device_info = device_info
 
     async def async_added_to_hass(self) -> None:
         self.async_on_remove(
@@ -329,19 +422,17 @@ class PVOverviewSensor(SensorEntity):
 
 
 class PVMirrorSensor(SensorEntity):
-    """Übernimmt Wert und Einheit eines Akku-Sensors, damit alles an einem Gerät hängt."""
+    """Übernimmt Wert und Einheit eines Quell-Sensors, damit alles an einem Gerät hängt."""
 
     entity_description: PVMirrorDescription
     _attr_has_entity_name = True
     _attr_should_poll = False
 
-    def __init__(
-        self, tracker: PVTracker, entry: PVConfigEntry, description: PVMirrorDescription, source: str
-    ) -> None:
+    def __init__(self, unique_id: str, device_info: DeviceInfo, description: PVMirrorDescription, source: str) -> None:
         self.entity_description = description
         self._source = source
-        self._attr_unique_id = f"{entry.entry_id}_{description.key}"
-        self._attr_device_info = _device_info(entry, tracker)
+        self._attr_unique_id = unique_id
+        self._attr_device_info = device_info
         self._attr_extra_state_attributes = {"source": source}
 
     async def async_added_to_hass(self) -> None:
