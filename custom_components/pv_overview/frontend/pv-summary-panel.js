@@ -26,7 +26,7 @@ const STYLE = `
   .chip.off { background:rgba(136,135,128,.15); }
   .chips { display:flex; gap:6px; flex-wrap:wrap; margin-left:auto; }
   .kpis { display:grid; gap:12px; grid-template-columns:repeat(2, minmax(0,1fr)); grid-auto-rows:1fr; }
-  .kpi { cursor:pointer; display:flex; align-items:center; gap:12px; padding:12px 14px; }
+  .kpi { display:flex; align-items:center; gap:12px; padding:12px 14px; }
   .kpi .ico { flex:none; width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center; --mdc-icon-size:20px; }
   .kpi .txt { min-width:0; }
   .flowcard svg { max-height:250px; margin:0 auto; }
@@ -37,6 +37,19 @@ const STYLE = `
   .up { color:var(--success-color, #43a047) !important; } .down { color:var(--error-color, #db4437) !important; }
   .mini { display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); }
   .mini .val { font-size:20px; }
+  .tile { padding:12px 14px; display:flex; flex-direction:column; justify-content:center; min-width:0; }
+  .tile .lbl { font-size:12px; color:var(--secondary-text-color); }
+  .tile .val { font-size:20px; font-weight:500; line-height:1.25; white-space:nowrap; }
+  .tile .val small { font-size:13px; font-weight:400; color:var(--secondary-text-color); margin-left:2px; }
+  .tile .sub { font-size:12px; color:var(--secondary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  g.click:hover circle { stroke-width:5; }
+  .curve-wrap { position:relative; touch-action:pan-y; }
+  .curve-wrap svg { cursor:crosshair; }
+  .tip { position:absolute; top:6px; pointer-events:none; background:var(--card-background-color, #fff); border:1px solid var(--divider-color, rgba(0,0,0,.12)); border-radius:8px; padding:8px 10px; font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.25); min-width:130px; z-index:1; }
+  .tip .time { font-weight:500; margin-bottom:4px; }
+  .tip .r { display:flex; align-items:center; gap:6px; white-space:nowrap; }
+  .tip .r b { margin-left:auto; padding-left:12px; font-weight:500; }
+  .tip .dot { width:8px; height:8px; border-radius:50%; }
   .list { display:grid; gap:10px; font-size:14px; }
   .list .item { cursor:pointer; }
   .list .line { display:flex; justify-content:space-between; gap:8px; }
@@ -244,6 +257,7 @@ class PVSummaryPanel extends HTMLElement {
     if (this._has("battery_soc") || this._has("battery_power")) parts.push(this._renderBattery());
     parts.push(`<div class="row">${this._renderRecords()}${this._renderMonths()}</div>`);
     this._content.innerHTML = parts.join("");
+    this._bindCurve();
   }
 
   _renderHead() {
@@ -275,8 +289,8 @@ class PVSummaryPanel extends HTMLElement {
     const nodes = {
       pv: { x: 60, y: 110, color: COLORS.pv, icon: "mdi:solar-power-variant", label: "PV", value: fmtW(pv), key: "power" },
       house: { x: 380, y: 110, color: COLORS.house, icon: "mdi:home", label: house !== null ? "Haus" : "Haus/Netz", value: house !== null ? fmtW(house) : "≈ " + fmtW(Math.max(pv - pvToBat, 0)), key: house !== null ? "house_power" : null },
-      bat: { x: 220, y: 195, color: COLORS.bat, icon: "mdi:home-battery", label: soc !== null ? `${fmt(soc, 0)} %` : "Akku", value: bat !== null ? (bat > 0 ? "+" : bat < 0 ? "−" : "") + fmtW(Math.abs(bat)) : "", key: soc !== null ? "battery_soc" : "battery_power" },
-      grid: { x: 220, y: 45, color: COLORS.grid, icon: "mdi:transmission-tower", label: grid === null || Math.abs(grid) <= 1 ? "Netz" : grid < 0 ? "Einspeisung" : "Bezug", value: grid !== null ? fmtW(Math.abs(grid)) : "", key: null },
+      bat: { x: 220, y: 195, color: COLORS.bat, icon: "mdi:home-battery", label: soc !== null ? `${fmt(soc, 0)} %` : "Akku", value: bat !== null ? (bat > 0 ? "+" : bat < 0 ? "−" : "") + fmtW(Math.abs(bat)) : "", key: this._has("battery_power") ? "battery_power" : soc !== null ? "battery_soc" : null },
+      grid: { x: 220, y: 45, color: COLORS.grid, icon: "mdi:transmission-tower", label: grid === null || Math.abs(grid) <= 1 ? "Netz" : grid < 0 ? "Einspeisung" : "Bezug", value: grid !== null ? fmtW(Math.abs(grid)) : "", key: this._has("grid_power") ? "grid_power" : null },
     };
     const line = (from, to, amount, color) => {
       const a = nodes[from], b = nodes[to];
@@ -313,7 +327,7 @@ class PVSummaryPanel extends HTMLElement {
       const pct = ((today - avg30) / avg30) * 100;
       delta = `<div class="sub ${pct >= 0 ? "up" : "down"}">${pct >= 0 ? "+" : "−"}${fmt(Math.abs(pct), 0)} % ggü. Ø 30 Tage</div>`;
     }
-    const kpi = (key, icon, color, label, value, unit, sub) => `<div class="card kpi" data-key="${key}">
+    const kpi = (key, icon, color, label, value, unit, sub) => `<div class="card kpi">
         <div class="ico" style="background:${color}22;color:${color}"><ha-icon icon="${icon}"></ha-icon></div>
         <div class="txt"><div class="lbl">${label}</div><div class="val">${value}<small>${unit}</small></div>${sub || ""}</div>
       </div>`;
@@ -380,9 +394,63 @@ class PVSummaryPanel extends HTMLElement {
       const peak = pv.pts.filter((p) => p[0] >= t0).reduce((m, p) => (p[1] > m[1] ? p : m), [0, -Infinity]);
       if (peak[1] > 0) paths += `<circle cx="${x(peak[0])}" cy="${y(peak[1])}" r="4" fill="${COLORS.pv}" stroke="var(--card-background-color,#fff)" stroke-width="2"/><text x="${x(peak[0]) + 8}" y="${y(peak[1]) - 6}" class="strong">${fmtW(peak[1])}</text>`;
     }
+    this._curve = {
+      W, t0, now, x, y, top: T, bottom: H - B,
+      series: series.map((s) => ({ ...s, pts: s.pts.filter((p) => p[0] >= t0).sort((a, b) => a[0] - b[0]) })),
+    };
+    const hover = `<g class="hover" style="display:none"><line class="hl" y1="${T}" y2="${H - B}" stroke="var(--primary-text-color)" stroke-opacity="0.4" stroke-width="1"/>${series.map((s) => `<circle r="4" fill="${s.color}" stroke="var(--card-background-color,#fff)" stroke-width="2"/>`).join("")}</g>`;
     const legend = series.map((s) => `<span style="display:inline-flex;align-items:center;gap:4px;margin-left:10px"><span style="width:10px;height:10px;border-radius:2px;background:${s.color}"></span>${s.label}</span>`).join("");
-    const body = series.length ? `<svg viewBox="0 0 ${W} ${H}">${grid}${paths}</svg>` : `<div class="empty">Noch keine Verlaufsdaten für heute.</div>`;
+    const body = series.length ? `<div class="curve-wrap"><svg viewBox="0 0 ${W} ${H}">${grid}${paths}${hover}</svg><div class="tip" style="display:none"></div></div>` : `<div class="empty">Noch keine Verlaufsdaten für heute.</div>`;
     return `<div class="card"><h3><ha-icon icon="mdi:chart-areaspline"></ha-icon>Leistung heute<span class="hint">${legend}</span></h3>${body}</div>`;
+  }
+
+  // Tooltip der Tageskurve: zeigt zur Mausposition alle Reihen (zuletzt bekannter Wert)
+  _bindCurve() {
+    const wrap = this._content.querySelector(".curve-wrap");
+    if (!wrap || !this._curve) return;
+    const svg = wrap.querySelector("svg");
+    svg.addEventListener("pointermove", (ev) => {
+      const rect = svg.getBoundingClientRect();
+      const px = ((ev.clientX - rect.left) / rect.width) * this._curve.W;
+      const { x, t0 } = this._curve;
+      const msPerPx = (x(t0 + 3600000) - x(t0)) / 3600000;
+      this._hoverT = t0 + (px - x(t0)) / msPerPx;
+      this._showHover();
+    });
+    svg.addEventListener("pointerleave", () => { this._hoverT = null; this._showHover(); });
+    if (this._hoverT != null) this._showHover();
+  }
+
+  _showHover() {
+    const wrap = this._content?.querySelector(".curve-wrap");
+    const c = this._curve;
+    if (!wrap || !c) return;
+    const g = wrap.querySelector(".hover");
+    const tip = wrap.querySelector(".tip");
+    if (this._hoverT == null) { g.style.display = "none"; tip.style.display = "none"; return; }
+    const t = Math.min(Math.max(this._hoverT, c.t0), c.now);
+    const xv = c.x(t);
+    g.style.display = "";
+    const line = g.querySelector(".hl");
+    line.setAttribute("x1", xv); line.setAttribute("x2", xv);
+    const dots = g.querySelectorAll("circle");
+    const rows = c.series.map((s, i) => {
+      const v = valueAt(s.pts, t);
+      const dot = dots[i];
+      if (v === null) { dot.style.display = "none"; return ""; }
+      dot.style.display = "";
+      dot.setAttribute("cx", xv); dot.setAttribute("cy", c.y(v));
+      let text = fmtW(Math.abs(v));
+      if (s.label === "Akku") text = v > 1 ? `+${text} lädt` : v < -1 ? `−${text} entlädt` : text;
+      return `<div class="r"><span class="dot" style="background:${s.color}"></span>${s.label}<b>${text}</b></div>`;
+    }).join("");
+    const time = new Date(t).toLocaleTimeString(LOCALE(), { hour: "2-digit", minute: "2-digit" });
+    tip.innerHTML = `<div class="time">${time} Uhr</div>${rows}`;
+    tip.style.display = "";
+    const rect = wrap.getBoundingClientRect();
+    const left = (xv / c.W) * rect.width;
+    const flip = left > rect.width - tip.offsetWidth - 24;
+    tip.style.left = `${flip ? left - tip.offsetWidth - 12 : left + 12}px`;
   }
 
   _renderDays() {
@@ -450,7 +518,7 @@ class PVSummaryPanel extends HTMLElement {
       temp ? `<span class="click muted" data-key="battery_temperature"><ha-icon icon="mdi:thermometer" style="--mdc-icon-size:16px"></ha-icon> ${fmtState(temp)}</span>` : "",
       volt ? `<span class="click muted" data-key="battery_voltage"><ha-icon icon="mdi:sine-wave" style="--mdc-icon-size:16px"></ha-icon> ${fmtState(volt)}</span>` : "",
     ].join("");
-    const mini = (key, label) => this._has(key) ? `<div class="card kpi" data-key="${key}"><div class="lbl">${label}</div><div class="val" style="font-size:20px">${fmt(this._num(key), 2)}<small>kWh</small></div></div>` : "";
+    const mini = (key, label) => this._has(key) ? `<div class="card tile"><div class="lbl">${label}</div><div class="val">${fmt(this._num(key), 2)}<small>kWh</small></div></div>` : "";
     return `<div class="card"><h3><ha-icon icon="mdi:home-battery"></ha-icon>Akku</h3>
       <div class="row" style="grid-template-columns:minmax(0,1fr) minmax(0,1.6fr);align-items:center">
         <div class="battery">${ring}<div class="info"><b>${status}</b>${details}</div></div>
@@ -461,7 +529,7 @@ class PVSummaryPanel extends HTMLElement {
   _renderRecords() {
     const best = this._state("best_day");
     const rec = this._state("max_power_alltime");
-    const item = (key, label, value, sub) => this._has(key) ? `<div class="card kpi" data-key="${key}"><div class="lbl">${label}</div><div class="val" style="font-size:20px">${value}</div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>` : "";
+    const item = (key, label, value, sub) => this._has(key) ? `<div class="card tile"><div class="lbl">${label}</div><div class="val">${value}</div><div class="sub">${sub || "&nbsp;"}</div></div>` : "";
     return `<div class="card"><h3><ha-icon icon="mdi:trophy-outline"></ha-icon>Durchschnitt und Rekorde<span class="hint">pro Tag</span></h3><div class="mini" style="grid-template-columns:repeat(auto-fit, minmax(150px, 1fr))">
       ${item("avg_daily_7", "Ø 7 Tage", `${fmt(this._num("avg_daily_7"), 1)}<small>kWh</small>`)}
       ${item("avg_daily_30", "Ø 30 Tage", `${fmt(this._num("avg_daily_30"), 1)}<small>kWh</small>`)}
@@ -532,8 +600,18 @@ function niceMax(v) {
 function ticks(min, max) {
   const step = niceMax((max - min) / 4) / 1;
   const out = [];
-  for (let v = Math.ceil(min / step) * step; v <= max + 1e-9; v += step) out.push(Math.round(v * 1000) / 1000);
+  for (let v = Math.ceil(min / step) * step; v <= max + 1e-9; v += step) out.push(Math.round(v * 1000) / 1000 || 0); // "|| 0" vermeidet die Anzeige "-0"
   return out;
+}
+
+// Zuletzt bekannter Wert einer Reihe zum Zeitpunkt t (Binärsuche), null vor dem ersten Messpunkt
+function valueAt(pts, t) {
+  let lo = 0, hi = pts.length - 1, found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (pts[mid][0] <= t) { found = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  return found < 0 ? null : pts[found][1];
 }
 
 // Antwort von history/history_during_period (komprimiertes Format) in [[ms, Wert], …] umwandeln
