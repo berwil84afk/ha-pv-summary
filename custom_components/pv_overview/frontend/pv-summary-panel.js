@@ -81,6 +81,7 @@ const STYLE = `
   .strgrid { display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); }
   .strtile { justify-content:flex-start; }
   .strtile .lbl { display:flex; align-items:center; gap:6px; font-size:13px; color:var(--primary-text-color); font-weight:500; }
+  .strtile .valrow { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
   .strtile .rows { display:grid; gap:2px; margin-top:6px; font-size:12px; color:var(--secondary-text-color); }
   .strtile .rows span { display:flex; justify-content:space-between; gap:8px; }
   .dot { display:inline-block; width:10px; height:10px; border-radius:50%; flex:none; }
@@ -362,9 +363,10 @@ class PVSummaryPanel extends HTMLElement {
     const exp = grid !== null ? Math.max(-grid, 0) : 0;
     // Bilanz: Quellen (PV, Akku-Entladen, Netzbezug) auf Senken (Haus, Akku-Laden, Einspeisung) verteilen
     const need = house ?? Math.max(pv - charge, 0);
-    const pvToHouse = Math.min(pv, need);
-    const pvToBat = Math.min(pv - pvToHouse, charge);
-    const pvToGrid = Math.min(pv - pvToHouse - pvToBat, exp);
+    // PV lädt zuerst den Akku: Lädt der Akku, während das Haus aus dem Netz bezieht, kommt die Ladung aus der PV
+    const pvToBat = Math.min(pv, charge);
+    const pvToHouse = Math.min(pv - pvToBat, need);
+    const pvToGrid = Math.min(pv - pvToBat - pvToHouse, exp);
     const batToHouse = Math.min(discharge, need - pvToHouse);
     const batToGrid = Math.min(discharge - batToHouse, Math.max(exp - pvToGrid, 0));
     const gridToHouse = Math.min(imp, Math.max(need - pvToHouse - batToHouse, 0));
@@ -673,12 +675,15 @@ class PVSummaryPanel extends HTMLElement {
     const tiles = this._stringInfo().map(({ s, k, color, today, yesterday }) => {
       const volt = this._state(k("string_voltage"));
       const curr = this._state(k("string_current"));
+      const power = this._num(k("string_power"));
       const row = (label, value, key) => `<span${key ? ` class="click" data-key="${key}"` : ""}>${label}<b>${value}</b></span>`;
       return `<div class="card tile strtile">
         <div class="lbl"><span class="dot" style="background:${color}"></span>${escapeHtml(s.title)}</div>
-        <div class="val">${fmt(today, 2)}<small>kWh heute</small></div>
+        <div class="valrow">
+          <div class="val">${fmt(today, 2)}<small>kWh heute</small></div>
+          <div class="val click" data-key="${k("string_power")}">${fmtWValue(power)}<small>${fmtWUnit(power)}</small></div>
+        </div>
         <div class="rows">
-          ${row("Jetzt", fmtW(this._num(k("string_power"))), k("string_power"))}
           ${row("Gestern", yesterday === null ? "–" : `${fmt(yesterday, 2)} kWh`)}
           ${row("Gesamt", `${fmt(this._num(k("string_total")), 1)} kWh`, k("string_total"))}
           ${volt ? row("Spannung", fmtState(volt), k("string_voltage")) : ""}
