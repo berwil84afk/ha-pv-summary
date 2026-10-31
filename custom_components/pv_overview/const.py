@@ -13,7 +13,7 @@ CONF_GRID_INVERT = "grid_invert"  # True: positive Werte bedeuten Einspeisung
 GRID_MIGRATED = "grid_migrated"  # v1.7: altes Hausverbrauch-Feld wurde ins Netz-Feld übernommen
 
 # Eigenes Dashboard (Panel in der Seitenleiste)
-VERSION = "1.7.0"
+VERSION = "1.7.1"
 # Eigene Adresse, damit sie nicht mit einem Lovelace-Dashboard "pv-summary" kollidiert
 PANEL_URL = "pv-summary-panel"
 STATIC_URL = "/pv_summary_static"
