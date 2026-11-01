@@ -72,6 +72,16 @@ const STYLE = `
   .empty { padding:40px 16px; text-align:center; color:var(--secondary-text-color); }
   .click { cursor:pointer; }
   .card h3 { flex-wrap:wrap; }
+  .list .total span { font-size:15px; }
+  .list .total b { font-size:20px; }
+  .strtile .val.big { font-size:32px; line-height:1.1; }
+  .rec2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .rec { border:1px solid var(--divider-color, rgba(0,0,0,.12)); border-radius:12px; padding:12px; text-align:center; display:grid; gap:2px; justify-items:center; }
+  .rec .big { font-size:26px; font-weight:500; line-height:1.2; }
+  .rec .big small { font-size:13px; font-weight:400; color:var(--secondary-text-color); margin-left:2px; }
+  .rec .sub { font-size:12px; color:var(--secondary-text-color); }
+  .avgs { display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px 16px; margin-top:12px; font-size:13px; color:var(--secondary-text-color); }
+  .avgs b { color:var(--primary-text-color); font-weight:500; margin-left:4px; }
   .lg { background:none; border:0; color:inherit; font:inherit; cursor:pointer; display:inline-flex; align-items:center; gap:4px; margin-left:10px; padding:0; }
   .lg.off { opacity:.45; text-decoration:line-through; }
   .navbtns { display:inline-flex; gap:4px; align-items:center; }
@@ -123,6 +133,13 @@ class PVSummaryPanel extends HTMLElement {
     this._prodMonth = null;  // erster Tag des gewählten Monats
     this._monthDays = [];
     this._hidden = {};       // Diagramm -> Set der ausgeblendeten Reihen (nur bis zum nächsten Tag/Zoom)
+    this._stringMode = "lines"; // "lines" oder "stack" (gestapelte Flächen)
+  }
+
+  // Ausgeblendete Reihen; „Leistung heute“ zeigt anfangs nur PV
+  _hiddenFor(chartId) {
+    if (!this._hidden[chartId]) this._hidden[chartId] = new Set(chartId === "main" ? ["house_power", "battery_power", "grid_power"] : []);
+    return this._hidden[chartId];
   }
 
   set hass(hass) {
@@ -155,7 +172,7 @@ class PVSummaryPanel extends HTMLElement {
   async _init() {
     this.shadowRoot.innerHTML = `<style>${STYLE}</style>
       <div class="toolbar"><ha-menu-button></ha-menu-button><div class="title">PV Summary</div><div class="tabs"></div></div>
-      <div class="content"><div class="empty">Lade Daten …</div></div>`;
+      <div class="content"><div class="empty">${TT("Lade Daten …", "Loading …")}</div></div>`;
     this._menu = this.shadowRoot.querySelector("ha-menu-button");
     this._menu.hass = this._hass;
     this._menu.narrow = this._narrow;
@@ -181,11 +198,11 @@ class PVSummaryPanel extends HTMLElement {
       const result = await this._hass.callWS({ type: "pv_summary/config" });
       this._entries = result.entries;
     } catch (err) {
-      this._content.innerHTML = `<div class="empty">PV Summary konnte nicht geladen werden: ${escapeHtml(err.message || String(err))}</div>`;
+      this._content.innerHTML = `<div class="empty">${TT("PV Summary konnte nicht geladen werden", "PV Summary could not be loaded")}: ${escapeHtml(err.message || String(err))}</div>`;
       return;
     }
     if (!this._entries.length) {
-      this._content.innerHTML = `<div class="empty">Noch keine PV-Anlage eingerichtet.</div>`;
+      this._content.innerHTML = `<div class="empty">${TT("Noch keine PV-Anlage eingerichtet.", "No PV system set up yet.")}</div>`;
       return;
     }
     this._renderTabs();
@@ -253,7 +270,7 @@ class PVSummaryPanel extends HTMLElement {
     }
     const toggle = ev.target.closest("[data-series]");
     if (toggle) {
-      const set = (this._hidden[toggle.dataset.chart] ||= new Set());
+      const set = this._hiddenFor(toggle.dataset.chart);
       if (set.has(toggle.dataset.series)) set.delete(toggle.dataset.series); else set.add(toggle.dataset.series);
       this._hover = null;
       this._render();
@@ -286,6 +303,10 @@ class PVSummaryPanel extends HTMLElement {
       this._zoom = null;
       this._hidden = {};
       this._fetchCurveHistory();
+    } else if (action === "smode-lines" || action === "smode-stack") {
+      this._stringMode = action === "smode-stack" ? "stack" : "lines";
+      this._hover = null;
+      this._render();
     } else if (action === "zoom-reset") {
       this._zoom = null;
       this._hidden = {};
@@ -417,19 +438,20 @@ class PVSummaryPanel extends HTMLElement {
     const parts = [this._renderHead()];
     if (this._view === "strings" && this._entry.strings?.length) {
       parts.push(
-        this._renderCurve("strings", "Leistung je String", "mdi:solar-panel-large",
-          this._entry.strings.map((s, i) => ({ key: `${s.id}|string_power`, color: STRING_COLORS[i % STRING_COLORS.length], label: s.title }))),
+        this._renderCurve("strings", TT("Leistung je String", "Power per string"), "mdi:solar-panel-large",
+          this._entry.strings.map((s, i) => ({ key: `${s.id}|string_power`, color: STRING_COLORS[i % STRING_COLORS.length], label: s.title })),
+          { stacked: this._stringMode === "stack", modes: true }),
         this._renderStringTiles(),
         `<div class="row wide-left">${this._renderStringDays()}${this._renderStringShare()}</div>`,
       );
     } else {
       parts.push(
         `<div class="row half">${this._renderFlow()}${this._renderKpis()}</div>`,
-        this._renderCurve("main", "Leistung", "mdi:chart-areaspline", [
+        this._renderCurve("main", TT("Leistung", "Power"), "mdi:chart-areaspline", [
           { key: "power", color: COLORS.pv, fill: true, peak: true, label: "PV" },
-          { key: "house_power", color: COLORS.house, label: "Haus" },
-          { key: "battery_power", color: COLORS.bat, signed: ["lädt", "entlädt"], label: "Akku" },
-          { key: "grid_power", color: COLORS.grid, signed: ["Bezug", "Einspeisung"], label: "Netz" },
+          { key: "house_power", color: COLORS.house, label: TT("Haus", "House") },
+          { key: "battery_power", color: COLORS.bat, signed: [TT("lädt", "charging"), TT("entlädt", "discharging")], label: TT("Akku", "Battery") },
+          { key: "grid_power", color: COLORS.grid, signed: [TT("Bezug", "import"), TT("Einspeisung", "export")], label: TT("Netz", "Grid") },
         ]),
         `<div class="row wide-left">${this._renderDays()}${this._renderPeriods()}</div>`,
       );
@@ -444,12 +466,12 @@ class PVSummaryPanel extends HTMLElement {
     const power = this._num("power");
     const active = power !== null && power >= (this._entry.threshold ?? 10);
     const chips = [
-      `<span class="chip ${active ? "on" : "off"}"><ha-icon icon="${active ? "mdi:white-balance-sunny" : "mdi:weather-night"}" style="--mdc-icon-size:16px"></ha-icon>${active ? "produziert" : "ruht"}</span>`,
+      `<span class="chip ${active ? "on" : "off"}"><ha-icon icon="${active ? "mdi:white-balance-sunny" : "mdi:weather-night"}" style="--mdc-icon-size:16px"></ha-icon>${active ? TT("produziert", "producing") : TT("ruht", "idle")}</span>`,
     ];
     const avg30 = this._num("avg_daily_30");
-    if (avg30 !== null) chips.push(`<span class="chip click" data-key="avg_daily_30"><ha-icon icon="mdi:chart-line" style="--mdc-icon-size:16px"></ha-icon>Ø ${fmt(avg30, 1)} kWh/Tag</span>`);
+    if (avg30 !== null) chips.push(`<span class="chip click" data-key="avg_daily_30"><ha-icon icon="mdi:chart-line" style="--mdc-icon-size:16px"></ha-icon>Ø ${fmt(avg30, 1)} ${TT("kWh/Tag", "kWh/day")}</span>`);
     const views = this._entry.strings?.length
-      ? `<div class="views">${[["overview", "Übersicht"], ["strings", "Strings"]].map(([v, label]) => `<button data-view="${v}" class="${this._view === v ? "active" : ""}">${label}</button>`).join("")}</div>`
+      ? `<div class="views">${[["overview", TT("Übersicht", "Overview")], ["strings", "Strings"]].map(([v, label]) => `<button data-view="${v}" class="${this._view === v ? "active" : ""}">${label}</button>`).join("")}</div>`
       : "";
     return `<div class="head"><ha-icon icon="mdi:solar-power-variant" style="color:${COLORS.pv};--mdc-icon-size:28px"></ha-icon><span class="name">${escapeHtml(this._entry.title)}</span>${views}<div class="chips">${chips.join("")}</div></div>`;
   }
@@ -481,12 +503,12 @@ class PVSummaryPanel extends HTMLElement {
       pv: { x: 60, y: 110, color: COLORS.pv, icon: "mdi:solar-power-variant", label: "PV", value: fmtW(pv), key: "power" },
       house: { x: 380, y: 110, color: COLORS.house, arcs: house ? [
         { label: "PV", color: COLORS.pv, v: pvToHouse },
-        { label: "Akku", color: COLORS.bat, v: batToHouse },
-        { label: "Netz", color: COLORS.grid, v: gridToHouse },
-      ] : null, icon: "mdi:home", label: house !== null ? "Haus" : "Haus/Netz", value: house !== null ? fmtW(house) : "≈ " + fmtW(need), key: house !== null ? "house_power" : null },
+        { label: TT("Akku", "Battery"), color: COLORS.bat, v: batToHouse },
+        { label: TT("Netz", "Grid"), color: COLORS.grid, v: gridToHouse },
+      ] : null, icon: "mdi:home", label: house !== null ? TT("Haus", "House") : TT("Haus/Netz", "House/Grid"), value: house !== null ? fmtW(house) : "≈ " + fmtW(need), key: house !== null ? "house_power" : null },
       // Leistung öffnet die Lade-/Entladeleistung, die Prozentzahl den Akkustand
-      bat: { x: 220, y: 195, color: soc !== null ? socColor(soc) : COLORS.bat, fill: soc, icon: "mdi:home-battery", label: soc !== null ? `${fmt(soc, 0)} %` : "Akku", value: bat !== null ? (bat > 0 ? "+" : bat < 0 ? "−" : "") + fmtW(Math.abs(bat)) : "", key: this._has("battery_power") ? "battery_power" : soc !== null ? "battery_soc" : null, labelKey: bat !== null && soc !== null ? "battery_soc" : null },
-      grid: { x: 220, y: 45, color: COLORS.grid, icon: "mdi:transmission-tower", label: grid === null || Math.abs(grid) <= 1 ? "Netz" : grid < 0 ? "Einspeisung" : "Bezug", value: grid !== null ? fmtW(Math.abs(grid)) : "", key: this._has("grid_power") ? "grid_power" : null },
+      bat: { x: 220, y: 195, color: soc !== null ? socColor(soc) : COLORS.bat, fill: soc, icon: "mdi:home-battery", label: soc !== null ? `${fmt(soc, 0)} %` : TT("Akku", "Battery"), value: bat !== null ? (bat > 0 ? "+" : bat < 0 ? "−" : "") + fmtW(Math.abs(bat)) : "", key: this._has("battery_power") ? "battery_power" : soc !== null ? "battery_soc" : null, labelKey: bat !== null && soc !== null ? "battery_soc" : null },
+      grid: { x: 220, y: 45, color: COLORS.grid, icon: "mdi:transmission-tower", label: grid === null || Math.abs(grid) <= 1 ? TT("Netz", "Grid") : grid < 0 ? TT("Einspeisung", "Export") : TT("Bezug", "Import"), value: grid !== null ? fmtW(Math.abs(grid)) : "", key: this._has("grid_power") ? "grid_power" : null },
     };
     const line = (a, b, forward, backward, colorA, colorB) => {
       const reverse = backward > 1 && backward > forward;
@@ -512,9 +534,9 @@ class PVSummaryPanel extends HTMLElement {
         <text x="${n.x}" y="${n.y + 8}" text-anchor="middle" class="strong" style="font-size:13px">${n.value || n.label}</text>
         <text x="${n.x}" y="${n.y + 23}" text-anchor="middle" style="font-size:${n.labelKey ? 12 : 10}px" ${n.labelKey ? `class="click strong" data-key="${n.labelKey}"` : ""}>${n.value ? n.label : ""}</text>
       </g>`;
-    const hint = house === null ? `<span class="hint">Netz bzw. Hausverbrauch nicht eingerichtet</span>` : "";
+    const hint = house === null ? `<span class="hint">${TT("Netz bzw. Hausverbrauch nicht eingerichtet", "Grid or house consumption not set up")}</span>` : "";
     const flow = `<svg viewBox="0 ${showGrid ? 0 : 60} 440 ${(showBat ? 240 : 175) - (showGrid ? 0 : 60)}">${lines}${circle(nodes.grid, showGrid)}${circle(nodes.pv)}${circle(nodes.house)}${circle(nodes.bat, showBat)}</svg>`;
-    return `<div class="card flowcard"><h3><ha-icon icon="mdi:transit-connection-variant"></ha-icon>Energiefluss jetzt${hint}</h3>${flow}</div>`;
+    return `<div class="card flowcard"><h3><ha-icon icon="mdi:transit-connection-variant"></ha-icon>${TT("Energiefluss jetzt", "Energy flow now")}${hint}</h3>${flow}</div>`;
   }
 
   _renderKpis() {
@@ -525,7 +547,7 @@ class PVSummaryPanel extends HTMLElement {
     let delta = "";
     if (today !== null && avg30) {
       const pct = ((today - avg30) / avg30) * 100;
-      delta = `<div class="sub ${pct >= 0 ? "up" : "down"}">${pct >= 0 ? "+" : "−"}${fmt(Math.abs(pct), 0)} % ggü. Ø 30 Tage</div>`;
+      delta = `<div class="sub ${pct >= 0 ? "up" : "down"}">${pct >= 0 ? "+" : "−"}${fmt(Math.abs(pct), 0)} % ${TT("ggü. Ø 30 Tage", "vs. 30-day avg")}</div>`;
     }
     const kpi = (key, icon, color, label, value, unit, sub) => `<div class="card kpi">
         <div class="ico" style="background:${color}22;color:${color}"><ha-icon icon="${icon}"></ha-icon></div>
@@ -534,24 +556,24 @@ class PVSummaryPanel extends HTMLElement {
     const sub = (text) => `<div class="sub">${text || "&nbsp;"}</div>`;
     const hours = this._num("production_time_today");
     const sixth = this._has("house_today")
-      ? kpi("house_today", "mdi:home-lightning-bolt-outline", COLORS.house, "Haus heute", fmt(this._num("house_today"), 2), "kWh", sub("Verbrauch"))
-      : kpi("week", "mdi:calendar-week", "#639922", "Diese Woche", fmt(this._num("week"), 1), "kWh", sub(""));
+      ? kpi("house_today", "mdi:home-lightning-bolt-outline", COLORS.house, TT("Haus heute", "House today"), fmt(this._num("house_today"), 2), "kWh", sub(TT("Verbrauch", "Consumption")))
+      : kpi("week", "mdi:calendar-week", "#639922", TT("Diese Woche", "This week"), fmt(this._num("week"), 1), "kWh", sub(""));
     return `<div class="kpis">
-      ${kpi("today", "mdi:solar-power", COLORS.pv, "Heute", fmt(today, 2), "kWh", delta || sub(""))}
-      ${kpi("yesterday", "mdi:calendar-arrow-left", "#8a8a8a", "Gestern", fmt(this._num("yesterday"), 2), "kWh", sub(best ? "Bester Tag " + fmt(this._num("best_day"), 1) + " kWh" : ""))}
-      ${kpi("max_power_today", "mdi:flash", "#ef6c00", "Spitze heute", fmtWValue(this._num("max_power_today")), fmtWUnit(this._num("max_power_today")), sub(max?.attributes?.time ? "um " + fmtTime(max.attributes.time) : ""))}
-      ${kpi("avg_power_today", "mdi:chart-bell-curve-cumulative", "#c9a000", "Ø Leistung", fmtWValue(this._num("avg_power_today")), fmtWUnit(this._num("avg_power_today")), sub("während der Produktion"))}
-      ${kpi("production_time_today", "mdi:timer-sand", "#5b7290", "Laufzeit heute", hours !== null ? fmtHours(hours).replace(" h", "") : "–", "h", sub(`über ${fmt(this._entry.threshold ?? 10, 0)} W`))}
+      ${kpi("today", "mdi:solar-power", COLORS.pv, TT("Heute", "Today"), fmt(today, 2), "kWh", delta || sub(""))}
+      ${kpi("yesterday", "mdi:calendar-arrow-left", "#8a8a8a", TT("Gestern", "Yesterday"), fmt(this._num("yesterday"), 2), "kWh", sub(best ? TT("Bester Tag ", "Best day ") + fmt(this._num("best_day"), 1) + " kWh" : ""))}
+      ${kpi("max_power_today", "mdi:flash", "#ef6c00", TT("Spitze heute", "Peak today"), fmtWValue(this._num("max_power_today")), fmtWUnit(this._num("max_power_today")), sub(max?.attributes?.time ? TT("um ", "at ") + fmtTime(max.attributes.time) : ""))}
+      ${kpi("avg_power_today", "mdi:chart-bell-curve-cumulative", "#c9a000", TT("Ø Leistung", "Avg power"), fmtWValue(this._num("avg_power_today")), fmtWUnit(this._num("avg_power_today")), sub(TT("während der Produktion", "while producing")))}
+      ${kpi("production_time_today", "mdi:timer-sand", "#5b7290", TT("Laufzeit heute", "Runtime today"), hours !== null ? fmtHours(hours).replace(" h", "") : "–", "h", sub(`${TT("über", "above")} ${fmt(this._entry.threshold ?? 10, 0)} W`))}
       ${sixth}
     </div>`;
   }
 
   // Tageskurve mit Tooltip; defs: [{ key, color, label, fill?, peak?, signed? }]
-  _renderCurve(chartId, title, icon, defs) {
+  _renderCurve(chartId, title, icon, defs, opts = {}) {
     const dayStart = this._dayStart, today = this._isToday;
     const now = today ? Date.now() : dayStart + 24 * 3600 * 1000;
     const [t0, t1] = this._zoom ?? [dayStart, dayStart + 24 * 3600 * 1000];
-    const hidden = this._hidden[chartId] || new Set();
+    const hidden = this._hiddenFor(chartId);
     const withData = [];
     for (const def of defs) {
       const id = this._id(def.key);
@@ -568,9 +590,19 @@ class PVSummaryPanel extends HTMLElement {
       if (pts.length) withData.push({ ...def, pts, all });
     }
     const series = withData.filter((s) => !hidden.has(s.key));
+    // Gestapelt: jede Fläche liegt auf der Summe der vorherigen Reihen
+    const stacked = opts.stacked && series.length > 0;
+    let stackTimes = [];
+    if (stacked) {
+      stackTimes = [...new Set(series.flatMap((s) => s.pts.map((p) => p[0])))].sort((a, b) => a - b);
+      series.forEach((s, k) => {
+        const below = series.slice(0, k);
+        s.cumAt = (tt) => [...below, s].reduce((a, r) => a + Math.max(valueAt(r.all, tt) ?? 0, 0), 0);
+      });
+    }
 
     const W = this._chartWidth(1), H = 220, L = 44, R = 8, T = 10, B = 24;
-    const vals = series.flatMap((s) => s.pts.map((p) => p[1]));
+    const vals = stacked ? stackTimes.map((tt) => series[series.length - 1].cumAt(tt)) : series.flatMap((s) => s.pts.map((p) => p[1]));
     // Achse richtet sich nach dem höchsten Wert im sichtbaren Ausschnitt
     const maxV = niceMax(Math.max(10, ...vals)); // mindestens 10 W, damit sich die Beschriftung nicht wiederholt
     const minV = Math.min(0, ...vals) < 0 ? -niceMax(-Math.min(...vals)) : 0;
@@ -594,7 +626,16 @@ class PVSummaryPanel extends HTMLElement {
     if (today && now >= t0 && now <= t1) grid += `<line x1="${x(now)}" x2="${x(now)}" y1="${T}" y2="${H - B}" stroke="var(--secondary-text-color)" stroke-dasharray="2 4" stroke-width="1"/>`;
 
     let paths = "";
-    for (const s of series) {
+    if (stacked) {
+      const step = (vals) => vals.flatMap((v, i) => (i ? [[stackTimes[i], vals[i - 1]], [stackTimes[i], v]] : [[stackTimes[0], v]]));
+      series.forEach((s, k) => {
+        const top = step(stackTimes.map((tt) => s.cumAt(tt)));
+        const bot = k ? step(stackTimes.map((tt) => series[k - 1].cumAt(tt))) : stackTimes.map((tt) => [tt, 0]);
+        const poly = [...top, ...bot.reverse()].map((p) => `${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join(" ");
+        paths += `<polygon points="${poly}" fill="${s.color}" fill-opacity="0.55" stroke="${s.color}" stroke-width="1"/>`;
+      });
+    }
+    for (const s of stacked ? [] : series) {
       const pts = s.pts;
       // Stufenlinie: ein Wert gilt bis zur nächsten Änderung
       let d = `M${x(pts[0][0]).toFixed(1)} ${y(pts[0][1]).toFixed(1)}`;
@@ -609,20 +650,24 @@ class PVSummaryPanel extends HTMLElement {
         if (peak[1] > 0) paths += `<circle cx="${x(peak[0])}" cy="${y(peak[1])}" r="4" fill="${s.color}" stroke="var(--card-background-color,#fff)" stroke-width="2"/><text x="${Math.min(x(peak[0]) + 8, W - 60)}" y="${Math.max(y(peak[1]) - 6, 12)}" class="strong">${fmtW(peak[1])}</text>`;
       }
     }
-    this._curves[chartId] = { W, t0, t1, now, x, y, tAt, L, R, series: series.map((s) => ({ ...s, pts: s.all })) };
+    this._curves[chartId] = { W, t0, t1, now, x, y, tAt, L, R, stacked, series: series.map((s) => ({ ...s, pts: s.all })) };
     const sel = `<rect class="sel" x="0" y="${T}" width="0" height="${H - T - B}" fill="var(--primary-color, #03a9f4)" fill-opacity="0.15" style="display:none"/>`;
     const hover = `<g class="hover" style="display:none"><line class="hl" y1="${T}" y2="${H - B}" stroke="var(--primary-text-color)" stroke-opacity="0.4" stroke-width="1"/>${series.map((s) => `<circle r="4" fill="${s.color}" stroke="var(--card-background-color,#fff)" stroke-width="2"/>`).join("")}</g>`;
     // Legende: Klick blendet die Linie aus bzw. wieder ein
-    const legend = withData.map((s) => `<button class="lg ${hidden.has(s.key) ? "off" : ""}" data-chart="${chartId}" data-series="${escapeHtml(s.key)}" title="${hidden.has(s.key) ? "Einblenden" : "Ausblenden"}"><span style="width:10px;height:10px;border-radius:2px;background:${s.color}"></span>${escapeHtml(s.label)}</button>`).join("");
-    const heading = today ? `${title} heute` : `${title} am ${new Date(dayStart).toLocaleDateString(LOCALE(), { day: "2-digit", month: "2-digit", year: "numeric" })}`;
+    const legend = withData.map((s) => `<button class="lg ${hidden.has(s.key) ? "off" : ""}" data-chart="${chartId}" data-series="${escapeHtml(s.key)}" title="${hidden.has(s.key) ? TT("Einblenden", "Show") : TT("Ausblenden", "Hide")}"><span style="width:10px;height:10px;border-radius:2px;background:${s.color}"></span>${escapeHtml(s.label)}</button>`).join("");
+    const dateText = new Date(dayStart).toLocaleDateString(LOCALE(), { day: "2-digit", month: "2-digit", year: "numeric" });
+    const heading = today ? `${title} ${TT("heute", "today")}` : `${title} ${TT("am", "on")} ${dateText}`;
+    const modes = opts.modes ? `<span class="navbtns">
+        <button class="navbtn ${stacked ? "" : "active"}" data-nav="smode-lines">${TT("Linien", "Lines")}</button>
+        <button class="navbtn ${stacked ? "active" : ""}" data-nav="smode-stack">${TT("Gestapelt", "Stacked")}</button></span>` : "";
     const nav = `<span class="navbtns">
-        ${this._zoom ? `<button class="navbtn" data-nav="zoom-reset">Zoom zurücksetzen</button>` : ""}
-        <button class="navbtn" data-nav="day-prev" title="Vortag">‹</button>
-        <button class="navbtn ${today ? "active" : ""}" data-nav="day-today">Heute</button>
-        <button class="navbtn" data-nav="day-next" title="Nächster Tag" ${today ? "disabled" : ""}>›</button></span>`;
-    const empty = today ? "Noch keine Verlaufsdaten für heute." : "Keine Daten vorhanden.";
-    const body = !series.length && withData.length ? `<div class="empty">Alle Linien ausgeblendet.</div>` : series.length ? `<div class="curve-wrap" data-chart="${chartId}"><svg viewBox="0 0 ${W} ${H}">${grid}${paths}${sel}${hover}</svg><div class="tip" style="display:none"></div></div>` : `<div class="empty">${empty}</div>`;
-    return `<div class="card"><h3><ha-icon icon="${icon}"></ha-icon>${heading}<span class="hint">${legend}</span>${nav}</h3>${body}</div>`;
+        ${this._zoom ? `<button class="navbtn" data-nav="zoom-reset">${TT("Zoom zurücksetzen", "Reset zoom")}</button>` : ""}
+        <button class="navbtn" data-nav="day-prev" title="${TT("Vortag", "Previous day")}">‹</button>
+        <button class="navbtn ${today ? "active" : ""}" data-nav="day-today">${TT("Heute", "Today")}</button>
+        <button class="navbtn" data-nav="day-next" title="${TT("Nächster Tag", "Next day")}" ${today ? "disabled" : ""}>›</button></span>`;
+    const empty = today ? TT("Noch keine Verlaufsdaten für heute.", "No history for today yet.") : TT("Keine Daten vorhanden.", "No data available.");
+    const body = !series.length && withData.length ? `<div class="empty">${TT("Alle Linien ausgeblendet.", "All lines hidden.")}</div>` : series.length ? `<div class="curve-wrap" data-chart="${chartId}"><svg viewBox="0 0 ${W} ${H}">${grid}${paths}${sel}${hover}</svg><div class="tip" style="display:none"></div></div>` : `<div class="empty">${empty}</div>`;
+    return `<div class="card"><h3><ha-icon icon="${icon}"></ha-icon>${heading}<span class="hint">${legend}</span>${modes}${nav}</h3>${body}</div>`;
   }
 
   // Tooltip und Zoom: Bewegen zeigt alle Werte, Ziehen wählt einen Zeitraum zum Heranzoomen
@@ -689,13 +734,14 @@ class PVSummaryPanel extends HTMLElement {
       const dot = dots[i];
       if (v === null) { dot.style.display = "none"; return ""; }
       dot.style.display = "";
-      dot.setAttribute("cx", xv); dot.setAttribute("cy", c.y(v));
+      dot.setAttribute("cx", xv); dot.setAttribute("cy", c.y(c.stacked && s.cumAt ? s.cumAt(t) : v));
       let text = fmtW(Math.abs(v));
       if (s.signed) text = v > 1 ? `+${text} ${s.signed[0]}` : v < -1 ? `−${text} ${s.signed[1]}` : text;
       return `<div class="r"><span class="dot" style="width:8px;height:8px;background:${s.color}"></span>${escapeHtml(s.label)}<b>${text}</b></div>`;
     }).join("");
     const time = new Date(t).toLocaleTimeString(LOCALE(), { hour: "2-digit", minute: "2-digit" });
-    tip.innerHTML = `<div class="time">${time} Uhr</div>${rows}`;
+    const total = c.stacked ? `<div class="r" style="border-top:1px solid var(--divider-color, rgba(0,0,0,.12));margin-top:2px;padding-top:2px">${TT("Summe", "Total")}<b>${fmtW(c.series.reduce((a, s) => a + Math.max(valueAt(s.pts, t) ?? 0, 0), 0))}</b></div>` : "";
+    tip.innerHTML = `<div class="time">${time}${TT(" Uhr", "")}</div>${rows}${total}`;
     tip.style.display = "";
     const rect = wrap.getBoundingClientRect();
     const left = (xv / c.W) * rect.width;
@@ -714,24 +760,24 @@ class PVSummaryPanel extends HTMLElement {
       slots = new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate();
       const byDay = Object.fromEntries(this._monthDays.map((d) => [d.start.getDate(), d]));
       days = Array.from({ length: slots }, (_, i) => byDay[i + 1] || null);
-      title = `Produktion im ${m.toLocaleDateString(LOCALE(), { month: "long", year: "numeric" })}`;
+      title = `${TT("Produktion im", "Production in")} ${m.toLocaleDateString(LOCALE(), { month: "long", year: "numeric" })}`;
       // Ø des Monats über abgeschlossene Tage mit Werten
       const done = this._monthDays.filter((d) => d.start.toDateString() !== todayKey && d.v > 0);
       avg = done.length ? done.reduce((a, d) => a + d.v, 0) / done.length : null;
     } else {
       days = this._days.slice(-30);
       slots = 30;
-      title = "Produktion der letzten 30 Tage";
+      title = TT("Produktion der letzten 30 Tage", "Production, last 30 days");
       avg = this._num("avg_daily_30");
     }
     const isCurMonth = month && month.getFullYear() === now.getFullYear() && month.getMonth() === now.getMonth();
     const toggle = `<span class="navbtns">
-        <button class="navbtn ${month ? "" : "active"}" data-nav="prod-30">30 Tage</button>
-        <button class="navbtn ${month ? "active" : ""}" data-nav="prod-month">Monat</button>
-        ${month ? `<button class="navbtn" data-nav="month-prev" title="Vormonat">‹</button><button class="navbtn" data-nav="month-next" title="Nächster Monat" ${isCurMonth ? "disabled" : ""}>›</button>` : ""}</span>`;
+        <button class="navbtn ${month ? "" : "active"}" data-nav="prod-30">${TT("30 Tage", "30 days")}</button>
+        <button class="navbtn ${month ? "active" : ""}" data-nav="prod-month">${TT("Monat", "Month")}</button>
+        ${month ? `<button class="navbtn" data-nav="month-prev" title="${TT("Vormonat", "Previous month")}">‹</button><button class="navbtn" data-nav="month-next" title="${TT("Nächster Monat", "Next month")}" ${isCurMonth ? "disabled" : ""}>›</button>` : ""}</span>`;
     const head = (hint) => `<h3><ha-icon icon="mdi:chart-bar"></ha-icon>${title}<span class="hint">${hint}</span>${toggle}</h3>`;
     const present = days.filter(Boolean);
-    if (!present.length) return `<div class="card">${head("")}<div class="empty">${month ? "Keine Daten vorhanden." : "Statistiken werden gesammelt – nach dem ersten vollen Tag erscheinen hier Balken."}</div></div>`;
+    if (!present.length) return `<div class="card">${head("")}<div class="empty">${month ? TT("Keine Daten vorhanden.", "No data available.") : TT("Statistiken werden gesammelt. Nach dem ersten vollen Tag erscheinen hier Balken.", "Statistics are being collected. Bars appear after the first full day.")}</div></div>`;
     const maxV = niceMax(Math.max(1, ...present.map((d) => d.v), avg || 0));
     const bw = (W - L - R) / slots;
     const y = (v) => T + (1 - v / maxV) * (H - T - B);
@@ -748,10 +794,10 @@ class PVSummaryPanel extends HTMLElement {
           `${d.start.toLocaleDateString(this._locale)}: ${fmt(d.v, 2)} kWh`, 2);
       }
       const date = d ? d.start : new Date(this._prodMonth.getFullYear(), this._prodMonth.getMonth(), i + 1);
-      if (i % every === 0 || i === days.length - 1) svg += `<text x="${(xi + bw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle">${date.getDate()}.${date.getMonth() + 1}.</text>`;
+      if (i % every === 0 || i === days.length - 1) svg += `<text x="${(xi + bw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle">${fmtDayMonth(date)}</text>`;
     });
     if (avg) svg += `<line x1="${L}" x2="${W - R}" y1="${y(avg)}" y2="${y(avg)}" stroke="#3b6d11" stroke-dasharray="5 4" stroke-width="1.5"/>`;
-    return `<div class="card">${head(avg ? `gestrichelt = Ø ${fmt(avg, 1)} kWh` : "")}<svg viewBox="0 0 ${W} ${H}">${svg}</svg></div>`;
+    return `<div class="card">${head(avg ? `${TT("gestrichelt = Ø", "dashed = avg")} ${fmt(avg, 1)} kWh` : "")}<svg viewBox="0 0 ${W} ${H}">${svg}</svg></div>`;
   }
 
   _renderPeriods() {
@@ -765,13 +811,13 @@ class PVSummaryPanel extends HTMLElement {
       const pct = expected ? Math.min(100, (v / expected) * 100) : 0;
       return `<div class="item" data-key="${key}"><div class="line"><span>${label}</span><b>${fmt(v, v !== null && v >= 100 ? 0 : 1)} kWh</b></div>${expected ? `<div class="bar"><div style="width:${pct.toFixed(0)}%;background:${color}"></div></div>` : ""}</div>`;
     };
-    return `<div class="card"><h3><ha-icon icon="mdi:calendar-range"></ha-icon>Zeiträume<span class="hint">Balken = Anteil an der Hochrechnung aus Ø 30 Tage</span></h3>
+    return `<div class="card"><h3><ha-icon icon="mdi:calendar-range"></ha-icon>${TT("Zeiträume", "Periods")}<span class="hint">${TT("Balken = Anteil an der Hochrechnung aus Ø 30 Tage", "Bar = share of the projection from the 30-day avg")}</span></h3>
       <div class="list">
-        ${row("week", "Diese Woche", 7, "#97c459")}
-        ${row("month", "Dieser Monat", dim, "#639922")}
-        ${row("year", "Dieses Jahr", 365, "#3b6d11")}
-        <div class="item line sep" data-key="last_month"><span class="muted">Letzter Monat</span><b>${fmt(this._num("last_month"), 1)} kWh</b></div>
-        <div class="item line" data-key="total"><span class="muted">Gesamt</span><b>${fmt(this._num("total"), 0)} kWh</b></div>
+        ${row("week", TT("Diese Woche", "This week"), 7, "#97c459")}
+        ${row("month", TT("Dieser Monat", "This month"), dim, "#639922")}
+        ${row("year", TT("Dieses Jahr", "This year"), 365, "#3b6d11")}
+        <div class="item line sep" data-key="last_month"><span class="muted">${TT("Letzter Monat", "Last month")}</span><b>${fmt(this._num("last_month"), 1)} kWh</b></div>
+        <div class="item line total" data-key="total"><span class="muted">${TT("Gesamt", "Total")}</span><b>${fmt(this._num("total"), 0)} kWh</b></div>
       </div></div>`;
   }
 
@@ -790,20 +836,20 @@ class PVSummaryPanel extends HTMLElement {
           <circle cx="50" cy="50" r="${r}" fill="none" stroke="var(--secondary-background-color, rgba(0,0,0,.06))" stroke-width="10"/>
           <circle cx="50" cy="50" r="${r}" fill="none" stroke="${color}" stroke-width="10" stroke-linecap="round" stroke-dasharray="${((soc / 100) * c).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 50 50)"/>
           <text x="50" y="57" text-anchor="middle" class="strong" style="font-size:20px">${fmt(soc, 0)} %</text></svg>`;
-      const status = bat === null ? "" : bat > 1 ? "lädt" : bat < -1 ? "entlädt" : "ruht";
+      const status = bat === null ? "" : bat > 1 ? TT("lädt", "charging") : bat < -1 ? TT("entlädt", "discharging") : TT("ruht", "idle");
       const lines = [
         bat !== null ? `<span class="click" data-key="${k("battery_power")}"><ha-icon icon="mdi:flash" style="--mdc-icon-size:15px"></ha-icon> ${bat > 0 ? "+" : bat < 0 ? "−" : ""}${fmtW(Math.abs(bat))} ${status}</span>` : "",
         temp || volt ? `<span class="muted">${temp ? `<span class="click" data-key="${k("battery_temperature")}"><ha-icon icon="mdi:thermometer" style="--mdc-icon-size:15px"></ha-icon> ${fmtState(temp)}</span>` : ""}${temp && volt ? " · " : ""}${volt ? `<span class="click" data-key="${k("battery_voltage")}"><ha-icon icon="mdi:sine-wave" style="--mdc-icon-size:15px"></ha-icon> ${fmtState(volt)}</span>` : ""}</span>` : "",
-        this._has(k("battery_charged_today")) ? `<span class="muted">heute ↑ ${fmt(this._num(k("battery_charged_today")), 2)} kWh · ↓ ${fmt(this._num(k("battery_discharged_today")), 2)} kWh</span>` : "",
+        this._has(k("battery_charged_today")) ? `<span class="muted">${TT("heute", "today")} ↑ ${fmt(this._num(k("battery_charged_today")), 2)} kWh · ↓ ${fmt(this._num(k("battery_discharged_today")), 2)} kWh</span>` : "",
       ].join("");
-      const capacity = b.capacity ? `<span class="muted">${fmt(b.capacity, 1)} kWh Kapazität</span>` : "";
+      const capacity = b.capacity ? `<span class="muted">${fmt(b.capacity, 1)} kWh ${TT("Kapazität", "capacity")}</span>` : "";
       return `<div class="batblock">${ring}<div class="info"><b>${escapeHtml(b.title)}</b>${lines}${capacity}</div></div>`;
     };
     const mini = (key, label) => this._has(key) ? `<div class="card tile"><div class="lbl">${label}</div><div class="val">${fmt(this._num(key), 2)}<small>kWh</small></div></div>` : "";
-    const totals = `${mini("battery_charged_today", batteries.length > 1 ? "Geladen heute (alle)" : "Geladen heute")}${mini("battery_discharged_today", batteries.length > 1 ? "Entladen heute (alle)" : "Entladen heute")}${mini("house_today", "Haus heute")}`;
+    const totals = `${mini("battery_charged_today", batteries.length > 1 ? TT("Geladen heute (alle)", "Charged today (all)") : TT("Geladen heute", "Charged today"))}${mini("battery_discharged_today", batteries.length > 1 ? TT("Entladen heute (alle)", "Discharged today (all)") : TT("Entladen heute", "Discharged today"))}${mini("house_today", TT("Haus heute", "House today"))}`;
     const soc = this._num("battery_soc");
-    const hint = batteries.length > 1 && soc !== null ? `<span class="hint">gemeinsam ${fmt(soc, 0)} %</span>` : "";
-    return `<div class="card"><h3><ha-icon icon="mdi:home-battery"></ha-icon>${batteries.length > 1 ? "Akkus" : "Akku"}${hint}</h3>
+    const hint = batteries.length > 1 && soc !== null ? `<span class="hint">${TT("gemeinsam", "combined")} ${fmt(soc, 0)} %</span>` : "";
+    return `<div class="card"><h3><ha-icon icon="mdi:home-battery"></ha-icon>${batteries.length > 1 ? TT("Akkus", "Batteries") : TT("Akku", "Battery")}${hint}</h3>
       <div class="batgrid">${batteries.map(block).join("")}</div>
       ${totals ? `<div class="mini" style="margin-top:12px">${totals}</div>` : ""}</div>`;
   }
@@ -811,25 +857,33 @@ class PVSummaryPanel extends HTMLElement {
   _renderRecords() {
     const best = this._state("best_day");
     const rec = this._state("max_power_alltime");
-    const item = (key, label, value, sub) => this._has(key) ? `<div class="card tile"><div class="lbl">${label}</div><div class="val">${value}</div><div class="sub">${sub || "&nbsp;"}</div></div>` : "";
-    return `<div class="card"><h3><ha-icon icon="mdi:trophy-outline"></ha-icon>Durchschnitt und Rekorde<span class="hint">pro Tag</span></h3><div class="mini" style="grid-template-columns:repeat(auto-fit, minmax(150px, 1fr))">
-      ${item("avg_daily_7", "Ø 7 Tage", `${fmt(this._num("avg_daily_7"), 1)}<small>kWh</small>`)}
-      ${item("avg_daily_30", "Ø 30 Tage", `${fmt(this._num("avg_daily_30"), 1)}<small>kWh</small>`)}
-      ${item("avg_daily_365", "Ø 365 Tage", `${fmt(this._num("avg_daily_365"), 1)}<small>kWh</small>`)}
-      ${item("avg_daily_total", "Ø gesamt", `${fmt(this._num("avg_daily_total"), 1)}<small>kWh</small>`)}
-      ${item("best_day", "Bester Tag", `${fmt(this._num("best_day"), 1)}<small>kWh</small>`, best?.attributes?.date ? fmtDate(best.attributes.date) : "")}
-      ${item("max_power_alltime", "Leistungsrekord", `${fmtWValue(this._num("max_power_alltime"))}<small>${fmtWUnit(this._num("max_power_alltime"))}</small>`, rec?.attributes?.time ? fmtDate(rec.attributes.time) : "")}
-    </div></div>`;
+    const record = (key, icon, value, unit, label, when) => this._has(key) ? `<div class="rec">
+        <ha-icon icon="${icon}" style="color:${COLORS.pv};--mdc-icon-size:22px"></ha-icon>
+        <div class="big">${value}<small>${unit}</small></div>
+        <div class="sub">${label}${when ? " · " + when : ""}</div></div>` : "";
+    const avg = (key, label) => this._has(key) ? `<span>${label}<b>${fmt(this._num(key), 1)} kWh</b></span>` : "";
+    const maxW = this._num("max_power_alltime");
+    return `<div class="card"><h3><ha-icon icon="mdi:trophy-outline"></ha-icon>${TT("Durchschnitt und Rekorde", "Averages and records")}</h3>
+      <div class="rec2">
+        ${record("best_day", "mdi:trophy", fmt(this._num("best_day"), 1), "kWh", TT("Bester Tag", "Best day"), best?.attributes?.date ? fmtDate(best.attributes.date) : "")}
+        ${record("max_power_alltime", "mdi:flash", fmtWValue(maxW), fmtWUnit(maxW), TT("Leistungsrekord", "Power record"), rec?.attributes?.time ? fmtDate(rec.attributes.time) : "")}
+      </div>
+      <div class="avgs">
+        ${avg("avg_daily_7", TT("Ø 7 Tage", "Avg 7 days"))}
+        ${avg("avg_daily_30", TT("Ø 30 Tage", "Avg 30 days"))}
+        ${avg("avg_daily_365", TT("Ø 365 Tage", "Avg 365 days"))}
+        ${avg("avg_daily_total", TT("Ø gesamt", "Avg overall"))}
+      </div></div>`;
   }
 
   _renderMonths() {
     const months = this._months.slice(-12);
-    if (!months.length) return `<div class="card"><h3><ha-icon icon="mdi:calendar-month"></ha-icon>Produktion der letzten 12 Monate</h3><div class="empty">Noch keine Monatsdaten.</div></div>`;
+    if (!months.length) return `<div class="card"><h3><ha-icon icon="mdi:calendar-month"></ha-icon>${TT("Produktion der letzten 12 Monate", "Production, last 12 months")}</h3><div class="empty">${TT("Noch keine Monatsdaten.", "No monthly data yet.")}</div></div>`;
     const W = this._chartWidth(0.5), H = 190, L = 40, R = 6, T = 18, B = 22;
     const maxV = niceMax(Math.max(1, ...months.map((m) => m.v)));
     const bw = (W - L - R) / 12;
     const y = (v) => T + (1 - v / maxV) * (H - T - B);
-    const names = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+    const monthName = (d) => d.toLocaleDateString(LOCALE(), { month: "short" }).replace(".", "");
     let svg = "";
     for (const v of ticks(0, maxV)) svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--divider-color, rgba(0,0,0,.1))"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v, 0)}</text>`;
     const offset = 12 - months.length;
@@ -838,11 +892,11 @@ class PVSummaryPanel extends HTMLElement {
       const xi = L + (offset + i) * bw;
       const h = Math.max(1, (Math.max(m.v, 0) / maxV) * (H - T - B));
       const cur = m.start.getMonth() === thisMonth && i === months.length - 1;
-      svg += barRect(xi + 3, bw - 6, m.v, maxV, H - B, H - T - B, cur ? COLORS.pv : "#639922", `${names[m.start.getMonth()]} ${m.start.getFullYear()}: ${fmt(m.v, 1)} kWh`, 3);
-      svg += `<text x="${(xi + bw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle">${names[m.start.getMonth()]}</text>`;
+      svg += barRect(xi + 3, bw - 6, m.v, maxV, H - B, H - T - B, cur ? COLORS.pv : "#639922", `${monthName(m.start)} ${m.start.getFullYear()}: ${fmt(m.v, 1)} kWh`, 3);
+      svg += `<text x="${(xi + bw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle">${monthName(m.start)}</text>`;
       if (m.v > 0) svg += `<text x="${(xi + bw / 2).toFixed(1)}" y="${(H - B - h - 4).toFixed(1)}" text-anchor="middle">${fmt(m.v, 0)}</text>`;
     });
-    return `<div class="card"><h3><ha-icon icon="mdi:calendar-month"></ha-icon>Produktion der letzten 12 Monate<span class="hint">kWh</span></h3><svg viewBox="0 0 ${W} ${H}">${svg}</svg></div>`;
+    return `<div class="card"><h3><ha-icon icon="mdi:calendar-month"></ha-icon>${TT("Produktion der letzten 12 Monate", "Production, last 12 months")}<span class="hint">kWh</span></h3><svg viewBox="0 0 ${W} ${H}">${svg}</svg></div>`;
   }
 
   _stringInfo() {
@@ -870,17 +924,17 @@ class PVSummaryPanel extends HTMLElement {
       return `<div class="card tile strtile">
         <div class="lbl"><span class="dot" style="background:${color}"></span>${escapeHtml(s.title)}</div>
         <div class="valrow">
-          <div class="val">${fmt(today, 2)}<small>kWh heute</small></div>
-          <div class="val click" data-key="${k("string_power")}">${fmtWValue(power)}<small>${fmtWUnit(power)}</small></div>
+          <div class="val">${fmt(today, 2)}<small>kWh ${TT("heute", "today")}</small></div>
+          <div class="val big click" data-key="${k("string_power")}" style="color:${color}">${fmtWValue(power)}<small>${fmtWUnit(power)}</small></div>
         </div>
         <div class="rows">
-          ${row("Gestern", yesterday === null ? "–" : `${fmt(yesterday, 2)} kWh`)}
-          ${row("Gesamt", `${fmt(this._num(k("string_total")), 1)} kWh`, k("string_total"))}
-          ${volt ? row("Spannung", fmtState(volt), k("string_voltage")) : ""}
-          ${curr ? row("Strom", fmtState(curr), k("string_current")) : ""}
+          ${row(TT("Gestern", "Yesterday"), yesterday === null ? "–" : `${fmt(yesterday, 2)} kWh`)}
+          ${row(TT("Gesamt", "Total"), `${fmt(this._num(k("string_total")), 1)} kWh`, k("string_total"))}
+          ${volt ? row(TT("Spannung", "Voltage"), fmtState(volt), k("string_voltage")) : ""}
+          ${curr ? row(TT("Strom", "Current"), fmtState(curr), k("string_current")) : ""}
         </div></div>`;
     }).join("");
-    return `<div class="card"><h3><ha-icon icon="mdi:solar-panel"></ha-icon>Ertrag je String</h3><div class="strgrid">${tiles}</div></div>`;
+    return `<div class="card"><h3><ha-icon icon="mdi:solar-panel"></ha-icon>${TT("Ertrag je String", "Yield per string")}</h3><div class="strgrid">${tiles}</div></div>`;
   }
 
   _renderStringShare() {
@@ -890,21 +944,22 @@ class PVSummaryPanel extends HTMLElement {
     const pct = (v, total) => (total > 0 ? (v / total) * 100 : 0);
     const stack = (values, total) => `<div class="stack">${values.map(({ v, color }) => `<div style="width:${pct(v, total).toFixed(2)}%;background:${color}"></div>`).join("")}</div>`;
     const legend = info.map(({ s, color, today, sum30 }) => `<span><span class="dot" style="background:${color}"></span>${escapeHtml(s.title)}<b>${fmt(pct(today || 0, totalToday), 0)} %</b><i>${total30 > 0 ? fmt(pct(sum30, total30), 0) + " %" : "–"}</i></span>`).join("");
-    return `<div class="card"><h3><ha-icon icon="mdi:chart-donut"></ha-icon>Anteil am Gesamtertrag</h3>
+    return `<div class="card"><h3><ha-icon icon="mdi:chart-donut"></ha-icon>${TT("Anteil am Gesamtertrag", "Share of total yield")}</h3>
       <div class="share">
-        <div><div class="lbl">Heute · ${fmt(totalToday, 2)} kWh</div>${stack(info.map((x) => ({ v: x.today || 0, color: x.color })), totalToday)}</div>
-        <div><div class="lbl">Letzte 30 Tage · ${fmt(total30, 1)} kWh</div>${total30 > 0 ? stack(info.map((x) => ({ v: x.sum30, color: x.color })), total30) : `<div class="muted" style="font-size:12px">Noch keine Statistik</div>`}</div>
-        <div class="legend"><span class="muted" style="font-size:12px">String<b style="font-weight:400">heute</b><i>30 Tage</i></span>${legend}</div>
+        <div><div class="lbl">${TT("Heute", "Today")} · ${fmt(totalToday, 2)} kWh</div>${stack(info.map((x) => ({ v: x.today || 0, color: x.color })), totalToday)}</div>
+        <div><div class="lbl">${TT("Letzte 30 Tage", "Last 30 days")} · ${fmt(total30, 1)} kWh</div>${total30 > 0 ? stack(info.map((x) => ({ v: x.sum30, color: x.color })), total30) : `<div class="muted" style="font-size:12px">${TT("Noch keine Statistik", "No statistics yet")}</div>`}</div>
+        <div class="legend"><span class="muted" style="font-size:12px">String<b style="font-weight:400">${TT("heute", "today")}</b><i>${TT("30 Tage", "30 days")}</i></span>${legend}</div>
       </div></div>`;
   }
 
   _renderStringDays() {
     const info = this._stringInfo();
-    const title = `<h3><ha-icon icon="mdi:chart-bar"></ha-icon>Produktion je String, letzte 30 Tage</h3>`;
+    const titleText = TT("Produktion je String, letzte 30 Tage", "Production per string, last 30 days");
+    const title = `<h3><ha-icon icon="mdi:chart-bar"></ha-icon>${titleText}</h3>`;
     const dayKeys = [...new Set(info.flatMap((x) => x.days.map((d) => d.start.toDateString())))]
       .map((k) => new Date(k)).sort((a, b) => a - b).slice(-30);
     const hasData = info.some((x) => x.days.some((d) => d.v !== 0));
-    if (!dayKeys.length || !hasData) return `<div class="card">${title}<div class="empty">Keine Daten vorhanden.</div></div>`;
+    if (!dayKeys.length || !hasData) return `<div class="card">${title}<div class="empty">${TT("Keine Daten vorhanden.", "No data available.")}</div></div>`;
     const W = this._chartWidth(0.58), H = 200, L = 36, R = 6, T = 14, B = 22;
     const values = info.map((x) => Object.fromEntries(x.days.map((d) => [d.start.toDateString(), d.v])));
     const maxV = niceMax(Math.max(0.5, ...values.flatMap((m) => Object.values(m))));
@@ -921,10 +976,10 @@ class PVSummaryPanel extends HTMLElement {
         if (v !== 0) svg += barRect(gx + j * bw, Math.max(1, bw - 0.5), v, maxV, H - B, H - T - B, x.color, `${escapeHtml(x.s.title)}, ${day.toLocaleDateString(this._locale)}: ${fmt(v, 2)} kWh`, 1);
       });
       const every = W < 450 ? 10 : 5;
-      if (i % every === 0 || i === dayKeys.length - 1) svg += `<text x="${(gx + gw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle">${day.getDate()}.${day.getMonth() + 1}.</text>`;
+      if (i % every === 0 || i === dayKeys.length - 1) svg += `<text x="${(gx + gw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle">${fmtDayMonth(day)}</text>`;
     });
     const legend = info.map((x) => `<span style="display:inline-flex;align-items:center;gap:4px;margin-left:10px"><span class="dot" style="background:${x.color}"></span>${escapeHtml(x.s.title)}</span>`).join("");
-    return `<div class="card"><h3><ha-icon icon="mdi:chart-bar"></ha-icon>Produktion je String, letzte 30 Tage<span class="hint">${legend}</span></h3><svg viewBox="0 0 ${W} ${H}">${svg}</svg></div>`;
+    return `<div class="card"><h3><ha-icon icon="mdi:chart-bar"></ha-icon>${titleText}<span class="hint">${legend}</span></h3><svg viewBox="0 0 ${W} ${H}">${svg}</svg></div>`;
   }
 
   // Breite der SVG-Koordinaten = echte Pixelbreite der Karte (Schrift bleibt so 11 px groß)
@@ -940,6 +995,8 @@ class PVSummaryPanel extends HTMLElement {
 // ------------------------------------------------------------------ Hilfsfunktionen
 
 let currentLocale = "de";
+// Texte: Deutsch, wenn Home Assistant auf Deutsch steht, sonst Englisch
+const TT = (de, en) => (currentLocale.toLowerCase().startsWith("de") ? de : en);
 const LOCALE = () => currentLocale;
 
 function fmt(v, digits = 1) {
@@ -987,11 +1044,13 @@ function sourceArcs(n) {
 // Farbe des Akkustands: unter 25 % rot, bis 75 % gelb, darüber grün
 function socColor(soc) { return soc < 25 ? "#e24b4a" : soc < 75 ? "#e6b800" : "#43a047"; }
 
+function fmtDayMonth(d) { return d.toLocaleDateString(LOCALE(), { day: "numeric", month: "numeric" }); }
+
 function startOfDay(ms) { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); }
 
 // Balken; negative Werte (Zählersprung in der Statistik) als kurzer roter Balken, ohne die Skala zu verzerren
 function barRect(x, w, v, maxV, base, height, color, title, rx) {
-  if (v < 0) return `<rect x="${x.toFixed(1)}" y="${(base - 4).toFixed(1)}" width="${w.toFixed(1)}" height="4" rx="1" fill="#e24b4a"><title>${title} – Zählersprung (negativer Wert)</title></rect>`;
+  if (v < 0) return `<rect x="${x.toFixed(1)}" y="${(base - 4).toFixed(1)}" width="${w.toFixed(1)}" height="4" rx="1" fill="#e24b4a"><title>${title}: ${TT("Zählersprung (negativer Wert)", "meter jump (negative value)")}</title></rect>`;
   const h = Math.max(1, (v / maxV) * height);
   return `<rect x="${x.toFixed(1)}" y="${(base - h).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="${rx}" fill="${color}"><title>${title}</title></rect>`;
 }
