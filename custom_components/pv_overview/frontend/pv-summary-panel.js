@@ -71,6 +71,19 @@ const STYLE = `
   .muted { color:var(--secondary-text-color); }
   .empty { padding:40px 16px; text-align:center; color:var(--secondary-text-color); }
   .click { cursor:pointer; }
+  .card h3 { flex-wrap:wrap; }
+  .navbtns { display:inline-flex; gap:4px; align-items:center; }
+  .navbtn { background:transparent; border:1px solid var(--divider-color, rgba(0,0,0,.12)); border-radius:999px; color:var(--secondary-text-color); font:inherit; font-size:12px; padding:2px 10px; cursor:pointer; }
+  .navbtn.active { background:var(--secondary-background-color, rgba(0,0,0,.06)); color:var(--primary-text-color); font-weight:500; }
+  .navbtn:disabled { opacity:.35; cursor:default; }
+  .flowgrid { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:center; }
+  .donut { display:grid; gap:6px; justify-items:center; font-size:12px; }
+  .donut svg { width:110px; }
+  .donutrow { display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .donut .legend { display:grid; gap:2px; justify-items:start; }
+  .donut .legend span { display:flex; align-items:center; gap:6px; white-space:nowrap; }
+  .donut .legend b { font-weight:500; margin-left:4px; }
+  @media (max-width: 700px) { .flowgrid { grid-template-columns:1fr; } .donutrow { flex-direction:row; justify-content:center; gap:20px; } .donut svg { width:96px; } }
   .views { display:inline-flex; border:1px solid var(--divider-color, rgba(0,0,0,.12)); border-radius:999px; overflow:hidden; margin-left:8px; }
   .views button { background:transparent; border:0; color:var(--secondary-text-color); font:inherit; font-size:13px; padding:5px 14px; cursor:pointer; }
   .views button.active { background:var(--secondary-background-color, rgba(0,0,0,.06)); color:var(--primary-text-color); font-weight:500; }
@@ -110,6 +123,11 @@ class PVSummaryPanel extends HTMLElement {
     this._view = "overview";
     this._curves = {};
     this._stringDays = {};
+    this._day = null;        // null = heute, sonst Mitternacht des gewählten Tages (ms)
+    this._zoom = null;       // [von, bis] in ms oder null
+    this._prodMode = "30";  // "30" = letzte 30 Tage, "month" = ein Kalendermonat
+    this._prodMonth = null;  // erster Tag des gewählten Monats
+    this._monthDays = [];
   }
 
   set hass(hass) {
@@ -158,6 +176,8 @@ class PVSummaryPanel extends HTMLElement {
       if (idx === undefined) return;
       this._selected = Number(idx);
       this._view = "overview";
+      this._day = null;
+      this._zoom = null;
       this._renderTabs();
       this._fetchHistory();
       this._render();
@@ -222,6 +242,7 @@ class PVSummaryPanel extends HTMLElement {
 
   _queueRender() {
     if (this._renderQueued) return;
+    if (this._drag) { setTimeout(() => this._queueRender(), 500); return; }
     this._renderQueued = true;
     const wait = Math.max(0, LIVE_RENDER_MS - (Date.now() - this._lastRender));
     setTimeout(() => { this._renderQueued = false; this._render(); }, wait);
@@ -235,12 +256,54 @@ class PVSummaryPanel extends HTMLElement {
       this._render();
       return;
     }
+    const nav = ev.target.closest("[data-nav]");
+    if (nav) {
+      this._onNav(nav.dataset.nav);
+      return;
+    }
     const el = ev.target.closest("[data-key]");
     if (!el) return;
     const entityId = this._id(el.dataset.key);
     if (!entityId) return;
     this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId }, bubbles: true, composed: true }));
   }
+
+  _onNav(action) {
+    const today = startOfDay(Date.now());
+    if (action === "day-prev" || action === "day-next") {
+      const cur = this._day ?? today;
+      const next = startOfDay(cur + (action === "day-prev" ? -1 : 1) * 36e5 * 24 + 36e5 * 2);
+      this._day = next >= today ? null : next;
+      this._zoom = null;
+      this._hover = null;
+      this._fetchCurveHistory();
+    } else if (action === "day-today") {
+      this._day = null;
+      this._zoom = null;
+      this._fetchCurveHistory();
+    } else if (action === "zoom-reset") {
+      this._zoom = null;
+      this._render();
+    } else if (action === "prod-30" || action === "prod-month") {
+      this._prodMode = action === "prod-30" ? "30" : "month";
+      if (this._prodMode === "month" && !this._prodMonth) {
+        const d = new Date(); this._prodMonth = new Date(d.getFullYear(), d.getMonth(), 1);
+      }
+      if (this._prodMode === "month") this._fetchMonthDays(); else this._render();
+    } else if (action === "month-prev" || action === "month-next") {
+      const m = this._prodMonth;
+      const next = new Date(m.getFullYear(), m.getMonth() + (action === "month-prev" ? -1 : 1), 1);
+      const now = new Date();
+      if (next > new Date(now.getFullYear(), now.getMonth(), 1)) return;
+      this._prodMonth = next;
+      this._fetchMonthDays();
+    }
+  }
+
+  // Erster Moment des angezeigten Tages (heute oder der gewählte vergangene Tag)
+  get _dayStart() { return this._day ?? startOfDay(Date.now()); }
+
+  get _isToday() { return this._day === null; }
 
   // ------------------------------------------------------------------ Daten
 
@@ -249,23 +312,10 @@ class PVSummaryPanel extends HTMLElement {
     if (!entry) return;
     const start = new Date(); start.setHours(0, 0, 0, 0);
     const strings = entry.strings || [];
-    const ids = [
-      ...["power", "battery_power", "house_power", "grid_power"],
-      ...strings.map((s) => `${s.id}|string_power`),
-    ].map((k) => this._id(k)).filter(Boolean);
     const total = this._id("total");
     const stringTotals = strings.map((s) => this._id(`${s.id}|string_total`)).filter(Boolean);
-    const jobs = [];
-    if (ids.length) {
-      jobs.push(this._hass.callWS({
-        type: "history/history_during_period",
-        start_time: start.toISOString(),
-        entity_ids: ids,
-        minimal_response: true,
-        no_attributes: true,
-        significant_changes_only: false,
-      }).then((res) => { this._history = parseHistory(res); }).catch(() => { this._history = {}; }));
-    }
+    const jobs = [this._fetchCurveHistory(false)];
+    if (this._prodMode === "month") jobs.push(this._fetchMonthDays(false));
     if (total) {
       const dayStart = new Date(start); dayStart.setDate(dayStart.getDate() - 29);
       const monthStart = new Date(start.getFullYear(), start.getMonth() - 11, 1);
@@ -297,6 +347,55 @@ class PVSummaryPanel extends HTMLElement {
     if (entry === this._entry) this._render();
   }
 
+  // Leistungsverlauf (PV, Haus, Akku, Netz, Strings) für den angezeigten Tag
+  async _fetchCurveHistory(render = true) {
+    const entry = this._entry;
+    if (!entry) return;
+    const start = this._dayStart;
+    const ids = [
+      ...["power", "battery_power", "house_power", "grid_power"],
+      ...(entry.strings || []).map((s) => `${s.id}|string_power`),
+    ].map((k) => this._id(k)).filter(Boolean);
+    if (!ids.length) return;
+    try {
+      const res = await this._hass.callWS({
+        type: "history/history_during_period",
+        start_time: new Date(start).toISOString(),
+        end_time: new Date(start + 24 * 3600 * 1000).toISOString(),
+        entity_ids: ids,
+        minimal_response: true,
+        no_attributes: true,
+        significant_changes_only: false,
+      });
+      if (start === this._dayStart) this._history = parseHistory(res);
+    } catch (err) {
+      this._history = {};
+    }
+    if (render && entry === this._entry) this._render();
+  }
+
+  // Tageswerte eines Kalendermonats für die Monatsansicht
+  async _fetchMonthDays(render = true) {
+    const total = this._id("total");
+    const m = this._prodMonth;
+    if (!total || !m) return;
+    try {
+      const res = await this._hass.callWS({
+        type: "recorder/statistics_during_period",
+        start_time: m.toISOString(),
+        end_time: new Date(m.getFullYear(), m.getMonth() + 1, 1).toISOString(),
+        statistic_ids: [total],
+        period: "day",
+        types: ["change"],
+        units: { energy: "kWh" },
+      });
+      if (m === this._prodMonth) this._monthDays = (res[total] || []).map((p) => ({ start: new Date(p.start), v: p.change ?? 0 }));
+    } catch (err) {
+      this._monthDays = [];
+    }
+    if (render) this._render();
+  }
+
   // ------------------------------------------------------------------ Rendering
 
   _renderTabs() {
@@ -312,7 +411,7 @@ class PVSummaryPanel extends HTMLElement {
     const parts = [this._renderHead()];
     if (this._view === "strings" && this._entry.strings?.length) {
       parts.push(
-        this._renderCurve("strings", "Leistung je String heute", "mdi:solar-panel-large",
+        this._renderCurve("strings", "Leistung je String", "mdi:solar-panel-large",
           this._entry.strings.map((s, i) => ({ key: `${s.id}|string_power`, color: STRING_COLORS[i % STRING_COLORS.length], label: s.title }))),
         this._renderStringTiles(),
         `<div class="row wide-left">${this._renderStringDays()}${this._renderStringShare()}</div>`,
@@ -320,7 +419,7 @@ class PVSummaryPanel extends HTMLElement {
     } else {
       parts.push(
         `<div class="row half">${this._renderFlow()}${this._renderKpis()}</div>`,
-        this._renderCurve("main", "Leistung heute", "mdi:chart-areaspline", [
+        this._renderCurve("main", "Leistung", "mdi:chart-areaspline", [
           { key: "power", color: COLORS.pv, fill: true, peak: true, label: "PV" },
           { key: "house_power", color: COLORS.house, label: "Haus" },
           { key: "battery_power", color: COLORS.bat, signed: ["lädt", "entlädt"], label: "Akku" },
@@ -376,7 +475,7 @@ class PVSummaryPanel extends HTMLElement {
       pv: { x: 60, y: 110, color: COLORS.pv, icon: "mdi:solar-power-variant", label: "PV", value: fmtW(pv), key: "power" },
       house: { x: 380, y: 110, color: COLORS.house, icon: "mdi:home", label: house !== null ? "Haus" : "Haus/Netz", value: house !== null ? fmtW(house) : "≈ " + fmtW(need), key: house !== null ? "house_power" : null },
       // Leistung öffnet die Lade-/Entladeleistung, die Prozentzahl den Akkustand
-      bat: { x: 220, y: 195, color: COLORS.bat, icon: "mdi:home-battery", label: soc !== null ? `${fmt(soc, 0)} %` : "Akku", value: bat !== null ? (bat > 0 ? "+" : bat < 0 ? "−" : "") + fmtW(Math.abs(bat)) : "", key: this._has("battery_power") ? "battery_power" : soc !== null ? "battery_soc" : null, labelKey: bat !== null && soc !== null ? "battery_soc" : null },
+      bat: { x: 220, y: 195, color: soc !== null ? socColor(soc) : COLORS.bat, fill: soc, icon: "mdi:home-battery", label: soc !== null ? `${fmt(soc, 0)} %` : "Akku", value: bat !== null ? (bat > 0 ? "+" : bat < 0 ? "−" : "") + fmtW(Math.abs(bat)) : "", key: this._has("battery_power") ? "battery_power" : soc !== null ? "battery_soc" : null, labelKey: bat !== null && soc !== null ? "battery_soc" : null },
       grid: { x: 220, y: 45, color: COLORS.grid, icon: "mdi:transmission-tower", label: grid === null || Math.abs(grid) <= 1 ? "Netz" : grid < 0 ? "Einspeisung" : "Bezug", value: grid !== null ? fmtW(Math.abs(grid)) : "", key: this._has("grid_power") ? "grid_power" : null },
     };
     const line = (a, b, forward, backward, colorA, colorB) => {
@@ -397,14 +496,39 @@ class PVSummaryPanel extends HTMLElement {
     const circle = (n, show = true) => !show ? "" : `
       <g class="${n.key ? "click" : ""}" ${n.key ? `data-key="${n.key}"` : ""}>
         <circle cx="${n.x}" cy="${n.y}" r="40" fill="var(--card-background-color, #fff)" stroke="${n.color}" stroke-width="3"/>
+        ${n.fill != null ? `<clipPath id="pvs-fill"><circle cx="${n.x}" cy="${n.y}" r="38.5"/></clipPath><rect x="${n.x - 40}" y="${(n.y + 40 - 0.8 * Math.min(Math.max(n.fill, 0), 100)).toFixed(1)}" width="80" height="${(0.8 * Math.min(Math.max(n.fill, 0), 100)).toFixed(1)}" fill="${n.color}" fill-opacity="0.3" clip-path="url(#pvs-fill)"/>` : ""}
         <foreignObject x="${n.x - 12}" y="${n.y - 32}" width="24" height="24"><ha-icon icon="${n.icon}" style="color:${n.color};--mdc-icon-size:22px"></ha-icon></foreignObject>
         <text x="${n.x}" y="${n.y + 8}" text-anchor="middle" class="strong" style="font-size:13px">${n.value || n.label}</text>
         <text x="${n.x}" y="${n.y + 23}" text-anchor="middle" style="font-size:${n.labelKey ? 12 : 10}px" ${n.labelKey ? `class="click strong" data-key="${n.labelKey}"` : ""}>${n.value ? n.label : ""}</text>
       </g>`;
-    const share = house ? Math.min(100, ((pvToHouse + batToHouse) / house) * 100) : null;
-    const hint = share !== null ? `<span class="hint">${fmt(share, 0)} % aus PV/Akku</span>` : grid === null ? `<span class="hint">Hausverbrauch nicht eingerichtet</span>` : "";
+    const hint = house === null ? `<span class="hint">Netz bzw. Hausverbrauch nicht eingerichtet</span>` : "";
+    const flow = `<svg viewBox="0 ${showGrid ? 0 : 60} 440 ${(showBat ? 240 : 160) - (showGrid ? 0 : 60)}">${lines}${circle(nodes.grid, showGrid)}${circle(nodes.pv)}${circle(nodes.house)}${circle(nodes.bat, showBat)}</svg>`;
+    // Ring: woher der Hausverbrauch gerade kommt
+    const donut = house !== null ? this._renderDonut([
+      { label: "PV", color: COLORS.pv, v: pvToHouse },
+      { label: "Akku", color: COLORS.bat, v: batToHouse },
+      { label: "Netz", color: COLORS.grid, v: gridToHouse },
+    ], house) : "";
     return `<div class="card flowcard"><h3><ha-icon icon="mdi:transit-connection-variant"></ha-icon>Energiefluss jetzt${hint}</h3>
-      <svg viewBox="0 ${showGrid ? 0 : 60} 440 ${(showBat ? 240 : 160) - (showGrid ? 0 : 60)}">${lines}${circle(nodes.grid, showGrid)}${circle(nodes.pv)}${circle(nodes.house)}${circle(nodes.bat, showBat)}</svg></div>`;
+      ${donut ? `<div class="flowgrid">${flow}${donut}</div>` : flow}</div>`;
+  }
+
+  _renderDonut(parts, total) {
+    const r = 44, c = 2 * Math.PI * r;
+    const sum = parts.reduce((a, p) => a + p.v, 0);
+    let offset = 0;
+    const arcs = parts.map((p) => {
+      const len = sum > 0 ? (p.v / sum) * c : 0;
+      const arc = len > 0.5 ? `<circle cx="60" cy="60" r="${r}" fill="none" stroke="${p.color}" stroke-width="18" stroke-dasharray="${len.toFixed(2)} ${(c - len).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90 60 60)"/>` : "";
+      offset += len;
+      return arc;
+    }).join("");
+    const legend = parts.map((p) => `<span><span class="dot" style="width:8px;height:8px;background:${p.color}"></span>${p.label}<b>${fmt(sum > 0 ? (p.v / sum) * 100 : 0, 0)} %</b></span>`).join("");
+    return `<div class="donut" title="Hausverbrauch jetzt aus PV, Akku und Netz">
+      <div class="muted">Haus jetzt aus</div>
+      <div class="donutrow"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="${r}" fill="none" stroke="var(--secondary-background-color, rgba(0,0,0,.06))" stroke-width="18"/>${arcs}
+        <text x="60" y="64" text-anchor="middle" class="strong" style="font-size:14px">${fmtW(total)}</text></svg>
+      <div class="legend">${legend}</div></div></div>`;
   }
 
   _renderKpis() {
@@ -438,23 +562,32 @@ class PVSummaryPanel extends HTMLElement {
 
   // Tageskurve mit Tooltip; defs: [{ key, color, label, fill?, peak?, signed? }]
   _renderCurve(chartId, title, icon, defs) {
-    const start = new Date(); start.setHours(0, 0, 0, 0);
-    const t0 = start.getTime(), t1 = t0 + 24 * 3600 * 1000, now = Date.now();
+    const dayStart = this._dayStart, today = this._isToday;
+    const now = today ? Date.now() : dayStart + 24 * 3600 * 1000;
+    const [t0, t1] = this._zoom ?? [dayStart, dayStart + 24 * 3600 * 1000];
     const series = [];
     for (const def of defs) {
       const id = this._id(def.key);
-      const pts = id ? (this._history[id] || []).filter((p) => p[0] >= t0) : [];
-      const live = this._num(def.key);
-      if (live !== null) pts.push([now, live]);
-      pts.sort((a, b) => a[0] - b[0]);
-      if (pts.length) series.push({ ...def, pts });
+      const all = id ? (this._history[id] || []).slice() : [];
+      if (today) { const live = this._num(def.key); if (live !== null) all.push([now, live]); }
+      all.sort((a, b) => a[0] - b[0]);
+      if (!all.length) continue;
+      // Sichtbarer Ausschnitt: Wert am Anfang, alle Punkte darin, bis zum Ende (bzw. jetzt) fortgeführt
+      const start = valueAt(all, t0);
+      const end = Math.min(t1, now);
+      const pts = all.filter((p) => p[0] > t0 && p[0] <= end);
+      if (start !== null) pts.unshift([t0, start]);
+      if (pts.length && pts[pts.length - 1][0] < end) pts.push([end, pts[pts.length - 1][1]]);
+      if (pts.length) series.push({ ...def, pts, all });
     }
 
     const W = this._chartWidth(1), H = 220, L = 44, R = 8, T = 10, B = 24;
-    const all = series.flatMap((s) => s.pts.map((p) => p[1]));
-    const maxV = niceMax(Math.max(100, ...all));
-    const minV = Math.min(0, ...all) < 0 ? -niceMax(-Math.min(...all)) : 0;
-    const x = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - R);
+    const vals = series.flatMap((s) => s.pts.map((p) => p[1]));
+    // Achse richtet sich nach dem höchsten Wert im sichtbaren Ausschnitt
+    const maxV = niceMax(Math.max(10, ...vals)); // mindestens 10 W, damit sich die Beschriftung nicht wiederholt
+    const minV = Math.min(0, ...vals) < 0 ? -niceMax(-Math.min(...vals)) : 0;
+    const x = (tt) => L + ((tt - t0) / (t1 - t0)) * (W - L - R);
+    const tAt = (px) => t0 + ((px - L) / (W - L - R)) * (t1 - t0);
     const y = (v) => T + (1 - (v - minV) / (maxV - minV)) * (H - T - B);
 
     let grid = "";
@@ -462,8 +595,15 @@ class PVSummaryPanel extends HTMLElement {
       grid += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--divider-color, rgba(0,0,0,.1))" stroke-width="1"/>`;
       grid += `<text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmtWShort(v)}</text>`;
     }
-    for (let h = 0; h <= 24; h += W < 500 ? 6 : 3) grid += `<text x="${x(t0 + h * 3600000)}" y="${H - 6}" text-anchor="middle">${String(h).padStart(2, "0")}:00</text>`;
-    grid += `<line x1="${x(now)}" x2="${x(now)}" y1="${T}" y2="${H - B}" stroke="var(--secondary-text-color)" stroke-dasharray="2 4" stroke-width="1"/>`;
+    const maxLabels = W < 500 ? 5 : 9;
+    const step = [15, 30, 60, 120, 180, 360].map((m) => m * 60000).find((s) => (t1 - t0) / s <= maxLabels) ?? 6 * 3600000;
+    // Marken ab Mitternacht Ortszeit ausrichten (nicht ab UTC)
+    for (let tt = dayStart + Math.ceil((t0 - dayStart) / step) * step; tt <= t1 + 1; tt += step) {
+      const d = new Date(tt);
+      const label = d.getHours() === 0 && d.getMinutes() === 0 && tt > dayStart ? "24:00" : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+      grid += `<text x="${x(tt)}" y="${H - 6}" text-anchor="middle">${label}</text>`;
+    }
+    if (today && now >= t0 && now <= t1) grid += `<line x1="${x(now)}" x2="${x(now)}" y1="${T}" y2="${H - B}" stroke="var(--secondary-text-color)" stroke-dasharray="2 4" stroke-width="1"/>`;
 
     let paths = "";
     for (const s of series) {
@@ -478,30 +618,65 @@ class PVSummaryPanel extends HTMLElement {
       paths += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.fill ? 2 : 1.5}" stroke-linejoin="round"/>`;
       if (s.peak) {
         const peak = pts.reduce((m, p) => (p[1] > m[1] ? p : m), [0, -Infinity]);
-        if (peak[1] > 0) paths += `<circle cx="${x(peak[0])}" cy="${y(peak[1])}" r="4" fill="${s.color}" stroke="var(--card-background-color,#fff)" stroke-width="2"/><text x="${x(peak[0]) + 8}" y="${y(peak[1]) - 6}" class="strong">${fmtW(peak[1])}</text>`;
+        if (peak[1] > 0) paths += `<circle cx="${x(peak[0])}" cy="${y(peak[1])}" r="4" fill="${s.color}" stroke="var(--card-background-color,#fff)" stroke-width="2"/><text x="${Math.min(x(peak[0]) + 8, W - 60)}" y="${Math.max(y(peak[1]) - 6, 12)}" class="strong">${fmtW(peak[1])}</text>`;
       }
     }
-    this._curves[chartId] = { W, t0, now, x, y, series };
+    this._curves[chartId] = { W, t0, t1, now, x, y, tAt, L, R, series: series.map((s) => ({ ...s, pts: s.all })) };
+    const sel = `<rect class="sel" x="0" y="${T}" width="0" height="${H - T - B}" fill="var(--primary-color, #03a9f4)" fill-opacity="0.15" style="display:none"/>`;
     const hover = `<g class="hover" style="display:none"><line class="hl" y1="${T}" y2="${H - B}" stroke="var(--primary-text-color)" stroke-opacity="0.4" stroke-width="1"/>${series.map((s) => `<circle r="4" fill="${s.color}" stroke="var(--card-background-color,#fff)" stroke-width="2"/>`).join("")}</g>`;
     const legend = series.map((s) => `<span style="display:inline-flex;align-items:center;gap:4px;margin-left:10px"><span style="width:10px;height:10px;border-radius:2px;background:${s.color}"></span>${escapeHtml(s.label)}</span>`).join("");
-    const body = series.length ? `<div class="curve-wrap" data-chart="${chartId}"><svg viewBox="0 0 ${W} ${H}">${grid}${paths}${hover}</svg><div class="tip" style="display:none"></div></div>` : `<div class="empty">Noch keine Verlaufsdaten für heute.</div>`;
-    return `<div class="card"><h3><ha-icon icon="${icon}"></ha-icon>${title}<span class="hint">${legend}</span></h3>${body}</div>`;
+    const heading = today ? `${title} heute` : `${title} am ${new Date(dayStart).toLocaleDateString(LOCALE(), { day: "2-digit", month: "2-digit", year: "numeric" })}`;
+    const nav = `<span class="navbtns">
+        ${this._zoom ? `<button class="navbtn" data-nav="zoom-reset">Zoom zurücksetzen</button>` : ""}
+        <button class="navbtn" data-nav="day-prev" title="Vortag">‹</button>
+        <button class="navbtn ${today ? "active" : ""}" data-nav="day-today">Heute</button>
+        <button class="navbtn" data-nav="day-next" title="Nächster Tag" ${today ? "disabled" : ""}>›</button></span>`;
+    const empty = today ? "Noch keine Verlaufsdaten für heute." : "Keine Daten vorhanden.";
+    const body = series.length ? `<div class="curve-wrap" data-chart="${chartId}"><svg viewBox="0 0 ${W} ${H}">${grid}${paths}${sel}${hover}</svg><div class="tip" style="display:none"></div></div>` : `<div class="empty">${empty}</div>`;
+    return `<div class="card"><h3><ha-icon icon="${icon}"></ha-icon>${heading}<span class="hint">${legend}</span>${nav}</h3>${body}</div>`;
   }
 
-  // Tooltip: zeigt zur Mausposition alle Reihen des Diagramms (zuletzt bekannter Wert)
+  // Tooltip und Zoom: Bewegen zeigt alle Werte, Ziehen wählt einen Zeitraum zum Heranzoomen
   _bindCurve() {
     for (const wrap of this._content.querySelectorAll(".curve-wrap")) {
       const chartId = wrap.dataset.chart;
       const svg = wrap.querySelector("svg");
-      svg.addEventListener("pointermove", (ev) => {
+      const sel = svg.querySelector(".sel");
+      const px = (ev) => {
         const c = this._curves[chartId];
         const rect = svg.getBoundingClientRect();
-        const px = ((ev.clientX - rect.left) / rect.width) * c.W;
-        const msPerPx = (c.x(c.t0 + 3600000) - c.x(c.t0)) / 3600000;
-        this._hover = { chartId, t: c.t0 + (px - c.x(c.t0)) / msPerPx };
+        return Math.min(Math.max(((ev.clientX - rect.left) / rect.width) * c.W, c.L), c.W - c.R);
+      };
+      svg.addEventListener("pointerdown", (ev) => {
+        if (ev.button !== 0) return;
+        this._drag = { chartId, x0: px(ev), x1: px(ev) };
+        svg.setPointerCapture(ev.pointerId);
+      });
+      svg.addEventListener("pointermove", (ev) => {
+        const c = this._curves[chartId];
+        const p = px(ev);
+        if (this._drag?.chartId === chartId) {
+          this._drag.x1 = p;
+          const a = Math.min(this._drag.x0, p), b = Math.max(this._drag.x0, p);
+          sel.setAttribute("x", a); sel.setAttribute("width", b - a);
+          sel.style.display = b - a > 4 ? "" : "none";
+        }
+        this._hover = { chartId, t: c.tAt(p) };
         this._showHover(chartId);
       });
-      svg.addEventListener("pointerleave", () => { this._hover = null; this._showHover(chartId); });
+      svg.addEventListener("pointerup", () => {
+        const drag = this._drag;
+        this._drag = null;
+        sel.style.display = "none";
+        if (!drag || Math.abs(drag.x1 - drag.x0) < 8) return;
+        const c = this._curves[chartId];
+        let a = c.tAt(Math.min(drag.x0, drag.x1)), b = c.tAt(Math.max(drag.x0, drag.x1));
+        if (b - a < 10 * 60000) { const mid = (a + b) / 2; a = mid - 5 * 60000; b = mid + 5 * 60000; }
+        this._zoom = [a, b];
+        this._hover = null;
+        this._render();
+      });
+      svg.addEventListener("pointerleave", () => { if (!this._drag) { this._hover = null; this._showHover(chartId); } });
       if (this._hover?.chartId === chartId) this._showHover(chartId);
     }
   }
@@ -513,7 +688,7 @@ class PVSummaryPanel extends HTMLElement {
     const g = wrap.querySelector(".hover");
     const tip = wrap.querySelector(".tip");
     if (this._hover?.chartId !== chartId) { g.style.display = "none"; tip.style.display = "none"; return; }
-    const t = Math.min(Math.max(this._hover.t, c.t0), c.now);
+    const t = Math.min(Math.max(this._hover.t, c.t0), Math.min(c.t1, c.now));
     const xv = c.x(t);
     g.style.display = "";
     const line = g.querySelector(".hl");
@@ -539,29 +714,54 @@ class PVSummaryPanel extends HTMLElement {
   }
 
   _renderDays() {
-    const days = this._days.slice(-30);
-    const avg = this._num("avg_daily_30");
+    const month = this._prodMode === "month" && this._prodMonth;
     const W = this._chartWidth(0.58), H = 190, L = 36, R = 6, T = 14, B = 22;
-    if (!days.length) return `<div class="card"><h3><ha-icon icon="mdi:chart-bar"></ha-icon>Produktion der letzten 30 Tage</h3><div class="empty">Statistiken werden gesammelt – nach dem ersten vollen Tag erscheinen hier Balken.</div></div>`;
-    const maxV = niceMax(Math.max(1, ...days.map((d) => d.v), avg || 0));
-    const bw = (W - L - R) / 30;
+    const now = new Date();
+    const todayKey = now.toDateString();
+    let days, slots, title, avg;
+    if (month) {
+      const m = this._prodMonth;
+      slots = new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate();
+      const byDay = Object.fromEntries(this._monthDays.map((d) => [d.start.getDate(), d]));
+      days = Array.from({ length: slots }, (_, i) => byDay[i + 1] || null);
+      title = `Produktion im ${m.toLocaleDateString(LOCALE(), { month: "long", year: "numeric" })}`;
+      // Ø des Monats über abgeschlossene Tage mit Werten
+      const done = this._monthDays.filter((d) => d.start.toDateString() !== todayKey && d.v > 0);
+      avg = done.length ? done.reduce((a, d) => a + d.v, 0) / done.length : null;
+    } else {
+      days = this._days.slice(-30);
+      slots = 30;
+      title = "Produktion der letzten 30 Tage";
+      avg = this._num("avg_daily_30");
+    }
+    const isCurMonth = month && month.getFullYear() === now.getFullYear() && month.getMonth() === now.getMonth();
+    const toggle = `<span class="navbtns">
+        <button class="navbtn ${month ? "" : "active"}" data-nav="prod-30">30 Tage</button>
+        <button class="navbtn ${month ? "active" : ""}" data-nav="prod-month">Monat</button>
+        ${month ? `<button class="navbtn" data-nav="month-prev" title="Vormonat">‹</button><button class="navbtn" data-nav="month-next" title="Nächster Monat" ${isCurMonth ? "disabled" : ""}>›</button>` : ""}</span>`;
+    const head = (hint) => `<h3><ha-icon icon="mdi:chart-bar"></ha-icon>${title}<span class="hint">${hint}</span>${toggle}</h3>`;
+    const present = days.filter(Boolean);
+    if (!present.length) return `<div class="card">${head("")}<div class="empty">${month ? "Keine Daten vorhanden." : "Statistiken werden gesammelt – nach dem ersten vollen Tag erscheinen hier Balken."}</div></div>`;
+    const maxV = niceMax(Math.max(1, ...present.map((d) => d.v), avg || 0));
+    const bw = (W - L - R) / slots;
     const y = (v) => T + (1 - v / maxV) * (H - T - B);
-    const bestV = Math.max(...days.map((d) => d.v));
-    const todayKey = new Date().toDateString();
+    const bestV = Math.max(...present.map((d) => d.v));
     let svg = "";
     for (const v of ticks(0, maxV)) svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--divider-color, rgba(0,0,0,.1))"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v, 0)}</text>`;
-    const offset = 30 - days.length;
+    const offset = month ? 0 : slots - days.length;
+    const every = W < 450 ? 10 : 5;
     days.forEach((d, i) => {
       const xi = L + (offset + i) * bw;
-      const isToday = d.start.toDateString() === todayKey;
-      const color = isToday ? COLORS.pv : d.v === bestV ? "#ef9f27" : "#97c459";
-      const h = Math.max(1, (d.v / maxV) * (H - T - B));
-      svg += `<rect x="${(xi + 1.5).toFixed(1)}" y="${(H - B - h).toFixed(1)}" width="${(bw - 3).toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${color}"><title>${d.start.toLocaleDateString(this._locale)}: ${fmt(d.v, 2)} kWh</title></rect>`;
-      const every = W < 450 ? 10 : 5;
-      if (i % every === 0 || i === days.length - 1) svg += `<text x="${(xi + bw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle">${d.start.getDate()}.${d.start.getMonth() + 1}.</text>`;
+      if (d) {
+        const isToday = d.start.toDateString() === todayKey;
+        svg += barRect(xi + 1.5, bw - 3, d.v, maxV, H - B, H - T - B, isToday ? COLORS.pv : d.v === bestV ? "#ef9f27" : "#97c459",
+          `${d.start.toLocaleDateString(this._locale)}: ${fmt(d.v, 2)} kWh`, 2);
+      }
+      const date = d ? d.start : new Date(this._prodMonth.getFullYear(), this._prodMonth.getMonth(), i + 1);
+      if (i % every === 0 || i === days.length - 1) svg += `<text x="${(xi + bw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle">${date.getDate()}.${date.getMonth() + 1}.</text>`;
     });
     if (avg) svg += `<line x1="${L}" x2="${W - R}" y1="${y(avg)}" y2="${y(avg)}" stroke="#3b6d11" stroke-dasharray="5 4" stroke-width="1.5"/>`;
-    return `<div class="card"><h3><ha-icon icon="mdi:chart-bar"></ha-icon>Produktion der letzten 30 Tage<span class="hint">${avg ? `gestrichelt = Ø ${fmt(avg, 1)} kWh` : ""}</span></h3><svg viewBox="0 0 ${W} ${H}">${svg}</svg></div>`;
+    return `<div class="card">${head(avg ? `gestrichelt = Ø ${fmt(avg, 1)} kWh` : "")}<svg viewBox="0 0 ${W} ${H}">${svg}</svg></div>`;
   }
 
   _renderPeriods() {
@@ -595,7 +795,7 @@ class PVSummaryPanel extends HTMLElement {
       const temp = this._state(k("battery_temperature"));
       const volt = this._state(k("battery_voltage"));
       const r = 40, c = 2 * Math.PI * r;
-      const color = soc === null ? COLORS.bat : soc < 20 ? "#e24b4a" : soc < 40 ? "#ef9f27" : COLORS.bat;
+      const color = soc === null ? COLORS.bat : socColor(soc);
       const ring = soc === null ? `<ha-icon icon="mdi:home-battery-outline" style="--mdc-icon-size:40px;color:${COLORS.bat}"></ha-icon>` : `<svg viewBox="0 0 100 100" style="width:84px;flex:none" class="click" data-key="${k("battery_soc")}">
           <circle cx="50" cy="50" r="${r}" fill="none" stroke="var(--secondary-background-color, rgba(0,0,0,.06))" stroke-width="10"/>
           <circle cx="50" cy="50" r="${r}" fill="none" stroke="${color}" stroke-width="10" stroke-linecap="round" stroke-dasharray="${((soc / 100) * c).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 50 50)"/>
@@ -646,9 +846,9 @@ class PVSummaryPanel extends HTMLElement {
     const thisMonth = new Date().getMonth();
     months.forEach((m, i) => {
       const xi = L + (offset + i) * bw;
-      const h = Math.max(1, (m.v / maxV) * (H - T - B));
+      const h = Math.max(1, (Math.max(m.v, 0) / maxV) * (H - T - B));
       const cur = m.start.getMonth() === thisMonth && i === months.length - 1;
-      svg += `<rect x="${(xi + 3).toFixed(1)}" y="${(H - B - h).toFixed(1)}" width="${(bw - 6).toFixed(1)}" height="${h.toFixed(1)}" rx="3" fill="${cur ? COLORS.pv : "#639922"}"><title>${names[m.start.getMonth()]} ${m.start.getFullYear()}: ${fmt(m.v, 1)} kWh</title></rect>`;
+      svg += barRect(xi + 3, bw - 6, m.v, maxV, H - B, H - T - B, cur ? COLORS.pv : "#639922", `${names[m.start.getMonth()]} ${m.start.getFullYear()}: ${fmt(m.v, 1)} kWh`, 3);
       svg += `<text x="${(xi + bw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle">${names[m.start.getMonth()]}</text>`;
       if (m.v > 0) svg += `<text x="${(xi + bw / 2).toFixed(1)}" y="${(H - B - h - 4).toFixed(1)}" text-anchor="middle">${fmt(m.v, 0)}</text>`;
     });
@@ -713,7 +913,8 @@ class PVSummaryPanel extends HTMLElement {
     const title = `<h3><ha-icon icon="mdi:chart-bar"></ha-icon>Produktion je String, letzte 30 Tage</h3>`;
     const dayKeys = [...new Set(info.flatMap((x) => x.days.map((d) => d.start.toDateString())))]
       .map((k) => new Date(k)).sort((a, b) => a - b).slice(-30);
-    if (!dayKeys.length) return `<div class="card">${title}<div class="empty">Statistiken werden gesammelt – nach dem ersten vollen Tag erscheinen hier Balken.</div></div>`;
+    const hasData = info.some((x) => x.days.some((d) => d.v !== 0));
+    if (!dayKeys.length || !hasData) return `<div class="card">${title}<div class="empty">Keine Daten vorhanden.</div></div>`;
     const W = this._chartWidth(0.58), H = 200, L = 36, R = 6, T = 14, B = 22;
     const values = info.map((x) => Object.fromEntries(x.days.map((d) => [d.start.toDateString(), d.v])));
     const maxV = niceMax(Math.max(0.5, ...values.flatMap((m) => Object.values(m))));
@@ -727,8 +928,7 @@ class PVSummaryPanel extends HTMLElement {
       const gx = L + (offset + i) * gw + 1.5;
       info.forEach((x, j) => {
         const v = values[j][day.toDateString()] ?? 0;
-        const h = Math.max(v > 0 ? 1 : 0, (v / maxV) * (H - T - B));
-        svg += `<rect x="${(gx + j * bw).toFixed(1)}" y="${(H - B - h).toFixed(1)}" width="${Math.max(1, bw - 0.5).toFixed(1)}" height="${h.toFixed(1)}" rx="1" fill="${x.color}"><title>${escapeHtml(x.s.title)}, ${day.toLocaleDateString(this._locale)}: ${fmt(v, 2)} kWh</title></rect>`;
+        if (v !== 0) svg += barRect(gx + j * bw, Math.max(1, bw - 0.5), v, maxV, H - B, H - T - B, x.color, `${escapeHtml(x.s.title)}, ${day.toLocaleDateString(this._locale)}: ${fmt(v, 2)} kWh`, 1);
       });
       const every = W < 450 ? 10 : 5;
       if (i % every === 0 || i === dayKeys.length - 1) svg += `<text x="${(gx + gw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle">${day.getDate()}.${day.getMonth() + 1}.</text>`;
@@ -776,6 +976,18 @@ function ticks(min, max) {
   const out = [];
   for (let v = Math.ceil(min / step) * step; v <= max + 1e-9; v += step) out.push(Math.round(v * 1000) / 1000 || 0); // "|| 0" vermeidet die Anzeige "-0"
   return out;
+}
+
+// Farbe des Akkustands: unter 25 % rot, bis 75 % gelb, darüber grün
+function socColor(soc) { return soc < 25 ? "#e24b4a" : soc < 75 ? "#e6b800" : "#43a047"; }
+
+function startOfDay(ms) { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); }
+
+// Balken; negative Werte (Zählersprung in der Statistik) als kurzer roter Balken, ohne die Skala zu verzerren
+function barRect(x, w, v, maxV, base, height, color, title, rx) {
+  if (v < 0) return `<rect x="${x.toFixed(1)}" y="${(base - 4).toFixed(1)}" width="${w.toFixed(1)}" height="4" rx="1" fill="#e24b4a"><title>${title} – Zählersprung (negativer Wert)</title></rect>`;
+  const h = Math.max(1, (v / maxV) * height);
+  return `<rect x="${x.toFixed(1)}" y="${(base - h).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="${rx}" fill="${color}"><title>${title}</title></rect>`;
 }
 
 // Zuletzt bekannter Wert einer Reihe zum Zeitpunkt t (Binärsuche), null vor dem ersten Messpunkt
