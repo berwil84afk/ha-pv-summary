@@ -6,6 +6,8 @@ const COLORS = { pv: "#f0a30a", bat: "#1d9e75", house: "#5b7290", grid: "#7f77dd
 const STRING_COLORS = ["#f0a30a", "#1d9e75", "#7f77dd", "#d85a30", "#378add", "#d4537e", "#639922", "#888780"];
 const HISTORY_REFRESH_MS = 5 * 60 * 1000;
 const LIVE_RENDER_MS = 2000;
+const BIN_MS = 5 * 60 * 1000;       // Raster der geglätteten Tageskurven
+const ZOOM_MIN_MS = 30 * 60 * 1000; // kleinster Zoom-Ausschnitt
 
 const STYLE = `
   :host { display:block; min-height:100vh; background:var(--primary-background-color); color:var(--primary-text-color); font-family:var(--paper-font-body1_-_font-family, inherit); }
@@ -52,6 +54,7 @@ const STYLE = `
   .tip .r { display:flex; align-items:center; gap:6px; white-space:nowrap; }
   .tip .r b { margin-left:auto; padding-left:12px; font-weight:500; }
   .tip .dot { width:8px; height:8px; border-radius:50%; }
+  .tip .rng { display:block; text-align:right; font-size:11px; color:var(--secondary-text-color); margin:-1px 0 2px; }
   .list { display:grid; gap:10px; font-size:14px; }
   .list .item { cursor:pointer; }
   .list .line { display:flex; justify-content:space-between; gap:8px; }
@@ -75,13 +78,17 @@ const STYLE = `
   .list .total span { font-size:15px; }
   .list .total b { font-size:20px; }
   .strtile .val.big { font-size:32px; line-height:1.1; }
-  .rec2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-  .rec { border:1px solid var(--divider-color, rgba(0,0,0,.12)); border-radius:12px; padding:12px; text-align:center; display:grid; gap:2px; justify-items:center; }
-  .rec .big { font-size:26px; font-weight:500; line-height:1.2; }
-  .rec .big small { font-size:13px; font-weight:400; color:var(--secondary-text-color); margin-left:2px; }
-  .rec .sub { font-size:12px; color:var(--secondary-text-color); }
-  .avgs { display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px 16px; margin-top:12px; font-size:13px; color:var(--secondary-text-color); }
-  .avgs b { color:var(--primary-text-color); font-weight:500; margin-left:4px; }
+  .reccard { display:flex; flex-direction:column; }
+  .recs { flex:1; display:grid; align-content:space-evenly; gap:10px; font-size:14px; }
+  .recrow { display:flex; align-items:center; gap:8px; }
+  .recrow b { margin-left:auto; font-size:20px; font-weight:500; white-space:nowrap; }
+  .recs small { font-size:12px; font-weight:400; color:var(--secondary-text-color); margin-left:2px; }
+  .recs .sep { padding-top:0; }
+  .avgrow { display:grid; grid-template-columns:minmax(76px,auto) 1fr 78px; align-items:center; gap:10px; font-size:13px; }
+  .avgrow .bar { margin-top:0; }
+  .avgrow b { text-align:right; font-weight:500; white-space:nowrap; }
+  .curve-wrap .zhint { position:absolute; left:50%; top:40%; transform:translate(-50%,-50%); pointer-events:none; background:rgba(0,0,0,.7); color:#fff; font-size:13px; padding:6px 12px; border-radius:8px; opacity:0; transition:opacity .2s; }
+  .curve-wrap .zhint.show { opacity:1; }
   .lg { background:none; border:0; color:inherit; font:inherit; cursor:pointer; display:inline-flex; align-items:center; gap:4px; margin-left:10px; padding:0; }
   .lg.off { opacity:.45; text-decoration:line-through; }
   .navbtns { display:inline-flex; gap:4px; align-items:center; }
@@ -254,7 +261,7 @@ class PVSummaryPanel extends HTMLElement {
 
   _queueRender() {
     if (this._renderQueued) return;
-    if (this._drag) { setTimeout(() => this._queueRender(), 500); return; }
+    if (this._drag || this._pinch) { setTimeout(() => this._queueRender(), 500); return; }
     this._renderQueued = true;
     const wait = Math.max(0, LIVE_RENDER_MS - (Date.now() - this._lastRender));
     setTimeout(() => { this._renderQueued = false; this._render(); }, wait);
@@ -434,25 +441,19 @@ class PVSummaryPanel extends HTMLElement {
 
   _render() {
     if (!this._entry || !this._content) return;
+    if (this._pinch) { this._queueRender(); return; } // laufende Zwei-Finger-Geste nicht unterbrechen
     this._lastRender = Date.now();
     const parts = [this._renderHead()];
     if (this._view === "strings" && this._entry.strings?.length) {
       parts.push(
-        this._renderCurve("strings", TT("Leistung je String", "Power per string"), "mdi:solar-panel-large",
-          this._entry.strings.map((s, i) => ({ key: `${s.id}|string_power`, color: STRING_COLORS[i % STRING_COLORS.length], label: s.title })),
-          { stacked: this._stringMode === "stack", modes: true }),
+        this._curveCard("strings"),
         this._renderStringTiles(),
         `<div class="row wide-left">${this._renderStringDays()}${this._renderStringShare()}</div>`,
       );
     } else {
       parts.push(
         `<div class="row half">${this._renderFlow()}${this._renderKpis()}</div>`,
-        this._renderCurve("main", TT("Leistung", "Power"), "mdi:chart-areaspline", [
-          { key: "power", color: COLORS.pv, fill: true, peak: true, label: "PV" },
-          { key: "house_power", color: COLORS.house, label: TT("Haus", "House") },
-          { key: "battery_power", color: COLORS.bat, signed: [TT("lädt", "charging"), TT("entlädt", "discharging")], label: TT("Akku", "Battery") },
-          { key: "grid_power", color: COLORS.grid, signed: [TT("Bezug", "import"), TT("Einspeisung", "export")], label: TT("Netz", "Grid") },
-        ]),
+        this._curveCard("main"),
         `<div class="row wide-left">${this._renderDays()}${this._renderPeriods()}</div>`,
       );
       if (this._entry.batteries?.length) parts.push(this._renderBattery());
@@ -460,6 +461,51 @@ class PVSummaryPanel extends HTMLElement {
     }
     this._content.innerHTML = parts.join("");
     this._bindCurve();
+  }
+
+  _curveCard(chartId) {
+    if (chartId === "strings") {
+      return this._renderCurve("strings", TT("Leistung je String", "Power per string"), "mdi:solar-panel-large",
+        this._entry.strings.map((s, i) => ({ key: `${s.id}|string_power`, color: STRING_COLORS[i % STRING_COLORS.length], label: s.title })),
+        { stacked: this._stringMode === "stack", modes: true });
+    }
+    return this._renderCurve("main", TT("Leistung", "Power"), "mdi:chart-areaspline", [
+      { key: "power", color: COLORS.pv, fill: true, peak: true, label: "PV" },
+      { key: "house_power", color: COLORS.house, label: TT("Haus", "House") },
+      { key: "battery_power", color: COLORS.bat, signed: [TT("lädt", "charging"), TT("entlädt", "discharging")], label: TT("Akku", "Battery") },
+      { key: "grid_power", color: COLORS.grid, signed: [TT("Bezug", "import"), TT("Einspeisung", "export")], label: TT("Netz", "Grid") },
+    ]);
+  }
+
+  // Nur ein Diagramm neu zeichnen (beim Zoomen): das SVG-Element bleibt, damit laufende Gesten weitergehen
+  _updateCurve(chartId) {
+    const wrap = this._content?.querySelector(`.curve-wrap[data-chart="${chartId}"]`);
+    const card = wrap?.closest(".card");
+    if (!card) { this._render(); return; }
+    const tpl = document.createElement("template");
+    tpl.innerHTML = this._curveCard(chartId);
+    const fresh = tpl.content.querySelector(".curve-wrap svg");
+    if (!fresh) { this._render(); return; }
+    const svg = wrap.querySelector("svg");
+    svg.setAttribute("viewBox", fresh.getAttribute("viewBox"));
+    svg.innerHTML = fresh.innerHTML;
+    card.querySelector("h3").replaceWith(tpl.content.querySelector("h3"));
+    this._showHover(chartId);
+  }
+
+  // Ausschnitt setzen: auf den Tag begrenzt, mindestens ZOOM_MIN_MS, ganzer Tag = kein Zoom
+  _setZoom(a, b) {
+    const d0 = this._dayStart, d1 = d0 + 24 * 3600 * 1000;
+    let span = Math.min(Math.max(b - a, ZOOM_MIN_MS), d1 - d0);
+    if (span >= d1 - d0 - 1000) { this._zoom = null; return; }
+    a = Math.min(Math.max(a, d0), d1 - span);
+    this._zoom = [a, a + span];
+  }
+
+  // Zeichnen beim Zoomen höchstens einmal je Bildschirm-Frame
+  _zoomFrame(chartId) {
+    if (this._zoomRaf) return;
+    this._zoomRaf = requestAnimationFrame(() => { this._zoomRaf = null; this._updateCurve(chartId); });
   }
 
   _renderHead() {
@@ -581,28 +627,29 @@ class PVSummaryPanel extends HTMLElement {
       if (today) { const live = this._num(def.key); if (live !== null) all.push([now, live]); }
       all.sort((a, b) => a[0] - b[0]);
       if (!all.length) continue;
-      // Sichtbarer Ausschnitt: Wert am Anfang, alle Punkte darin, bis zum Ende (bzw. jetzt) fortgeführt
-      const start = valueAt(all, t0);
-      const end = Math.min(t1, now);
-      const pts = all.filter((p) => p[0] > t0 && p[0] <= end);
-      if (start !== null) pts.unshift([t0, start]);
-      if (pts.length && pts[pts.length - 1][0] < end) pts.push([end, pts[pts.length - 1][1]]);
-      if (pts.length) withData.push({ ...def, pts, all });
+      // Geglättet: 5-Minuten-Abschnitte mit Mittelwert, Minimum und Maximum
+      const bins = binSeries(all, dayStart, now);
+      // Sichtbar: Abschnitte im Ausschnitt plus je einer davor und danach, damit die Linie bis an den Rand reicht
+      const vis = bins.filter((b) => b[0] + 2 * BIN_MS > t0 && b[0] - BIN_MS < t1);
+      if (vis.length) withData.push({ ...def, bins, vis });
     }
     const series = withData.filter((s) => !hidden.has(s.key));
     // Gestapelt: jede Fläche liegt auf der Summe der vorherigen Reihen
     const stacked = opts.stacked && series.length > 0;
-    let stackTimes = [];
     if (stacked) {
-      stackTimes = [...new Set(series.flatMap((s) => s.pts.map((p) => p[0])))].sort((a, b) => a - b);
       series.forEach((s, k) => {
         const below = series.slice(0, k);
-        s.cumAt = (tt) => [...below, s].reduce((a, r) => a + Math.max(valueAt(r.all, tt) ?? 0, 0), 0);
+        s.cumAt = (tt) => [...below, s].reduce((a, r) => a + Math.max(binAt(r.bins, tt)?.[1] ?? 0, 0), 0);
       });
     }
+    // Zeitpunkt, an dem ein Abschnitt gezeichnet wird: seine Mitte (der laufende endet bei „jetzt“)
+    const mid = (b) => b[0] + (Math.min(b[0] + BIN_MS, now) - b[0]) / 2;
+    const stackTimes = stacked ? [...new Set(series.flatMap((s) => s.vis.map((b) => b[0])))].sort((a, b) => a - b) : [];
 
     const W = this._chartWidth(1), H = 220, L = 44, R = 8, T = 10, B = 24;
-    const vals = stacked ? stackTimes.map((tt) => series[series.length - 1].cumAt(tt)) : series.flatMap((s) => s.pts.map((p) => p[1]));
+    const vals = stacked
+      ? stackTimes.map((tt) => series[series.length - 1].cumAt(tt))
+      : series.flatMap((s) => s.vis.flatMap((b) => [b[2], b[3]]));
     // Achse richtet sich nach dem höchsten Wert im sichtbaren Ausschnitt
     const maxV = niceMax(Math.max(10, ...vals)); // mindestens 10 W, damit sich die Beschriftung nicht wiederholt
     const minV = Math.min(0, ...vals) < 0 ? -niceMax(-Math.min(...vals)) : 0;
@@ -626,31 +673,41 @@ class PVSummaryPanel extends HTMLElement {
     if (today && now >= t0 && now <= t1) grid += `<line x1="${x(now)}" x2="${x(now)}" y1="${T}" y2="${H - B}" stroke="var(--secondary-text-color)" stroke-dasharray="2 4" stroke-width="1"/>`;
 
     let paths = "";
+    const xy = (p) => `${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`;
+    // Linie durch die Abschnittsmitten; der laufende Abschnitt wird bis „jetzt“ fortgeführt
+    const line = (vis, val) => {
+      const pts = vis.map((b) => [mid(b), val(b)]);
+      const last = vis[vis.length - 1];
+      if (today && last[0] + BIN_MS > now) pts.push([now, val(last)]);
+      return pts;
+    };
     if (stacked) {
-      const step = (vals) => vals.flatMap((v, i) => (i ? [[stackTimes[i], vals[i - 1]], [stackTimes[i], v]] : [[stackTimes[0], v]]));
+      const bins = stackTimes.map((tt) => [tt]);
       series.forEach((s, k) => {
-        const top = step(stackTimes.map((tt) => s.cumAt(tt)));
-        const bot = k ? step(stackTimes.map((tt) => series[k - 1].cumAt(tt))) : stackTimes.map((tt) => [tt, 0]);
-        const poly = [...top, ...bot.reverse()].map((p) => `${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join(" ");
-        paths += `<polygon points="${poly}" fill="${s.color}" fill-opacity="0.55" stroke="${s.color}" stroke-width="1"/>`;
+        const top = line(bins, (b) => s.cumAt(b[0]));
+        const bot = k ? line(bins, (b) => series[k - 1].cumAt(b[0])) : top.map((p) => [p[0], 0]);
+        paths += `<polygon points="${[...top, ...bot.reverse()].map(xy).join(" ")}" fill="${s.color}" fill-opacity="0.55" stroke="${s.color}" stroke-width="1" stroke-linejoin="round"/>`;
       });
     }
     for (const s of stacked ? [] : series) {
-      const pts = s.pts;
-      // Stufenlinie: ein Wert gilt bis zur nächsten Änderung
-      let d = `M${x(pts[0][0]).toFixed(1)} ${y(pts[0][1]).toFixed(1)}`;
-      for (let i = 1; i < pts.length; i++) d += ` H${x(pts[i][0]).toFixed(1)} V${y(pts[i][1]).toFixed(1)}`;
-      if (s.fill) {
-        const area = `${d} V${y(0).toFixed(1)} H${x(pts[0][0]).toFixed(1)} Z`;
-        paths += `<path d="${area}" fill="${s.color}" fill-opacity="0.25" stroke="none"/>`;
-      }
-      paths += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.fill ? 2 : 1.5}" stroke-linejoin="round"/>`;
+      const pts = line(s.vis, (b) => b[1]);
+      // Blasses Band vom kleinsten bis zum größten Wert je Abschnitt
+      const band = `<polygon points="${[...line(s.vis, (b) => b[3]), ...line(s.vis, (b) => b[2]).reverse()].map(xy).join(" ")}"/>`;
+      const d = "M" + pts.map(xy).join(" L");
+      const area = `<path d="${d} L${xy([pts[pts.length - 1][0], 0])} L${xy([pts[0][0], 0])} Z"/>`;
+      // Mit Fläche: Band und Fläche als eine Form (keine Streifen durch Überlappung), Fläche unter dem Mittel kräftiger
+      paths += s.fill
+        ? `<g fill="${s.color}" opacity="0.16">${band}${area}</g><g fill="${s.color}" opacity="0.14">${area}</g>`
+        : `<g fill="${s.color}" opacity="0.16">${band}</g>`;
+      paths += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.fill ? 2 : 1.5}" stroke-linejoin="round" stroke-linecap="round"/>`;
       if (s.peak) {
-        const peak = pts.reduce((m, p) => (p[1] > m[1] ? p : m), [0, -Infinity]);
-        if (peak[1] > 0) paths += `<circle cx="${x(peak[0])}" cy="${y(peak[1])}" r="4" fill="${s.color}" stroke="var(--card-background-color,#fff)" stroke-width="2"/><text x="${Math.min(x(peak[0]) + 8, W - 60)}" y="${Math.max(y(peak[1]) - 6, 12)}" class="strong">${fmtW(peak[1])}</text>`;
+        // Spitze = höchstes 5-Minuten-Mittel im Ausschnitt
+        const peak = s.vis.filter((b) => mid(b) >= t0 && mid(b) <= t1).reduce((m, b) => (b[1] > m[1] ? b : m), [0, -Infinity]);
+        if (peak[1] > 0) paths += `<circle cx="${x(mid(peak))}" cy="${y(peak[1])}" r="4" fill="${s.color}" stroke="var(--card-background-color,#fff)" stroke-width="2"/><text x="${Math.min(x(mid(peak)) + 8, W - 60)}" y="${Math.max(y(peak[1]) - 6, 12)}" class="strong">${fmtW(peak[1])}</text>`;
       }
     }
-    this._curves[chartId] = { W, t0, t1, now, x, y, tAt, L, R, stacked, series: series.map((s) => ({ ...s, pts: s.all })) };
+    paths = `<clipPath id="clip-${chartId}"><rect x="${L}" y="0" width="${W - L - R}" height="${H}"/></clipPath><g clip-path="url(#clip-${chartId})">${paths}</g>`;
+    this._curves[chartId] = { W, t0, t1, now, x, y, tAt, L, R, stacked, series, dayStart, mid };
     const sel = `<rect class="sel" x="0" y="${T}" width="0" height="${H - T - B}" fill="var(--primary-color, #03a9f4)" fill-opacity="0.15" style="display:none"/>`;
     const hover = `<g class="hover" style="display:none"><line class="hl" y1="${T}" y2="${H - B}" stroke="var(--primary-text-color)" stroke-opacity="0.4" stroke-width="1"/>${series.map((s) => `<circle r="4" fill="${s.color}" stroke="var(--card-background-color,#fff)" stroke-width="2"/>`).join("")}</g>`;
     // Legende: Klick blendet die Linie aus bzw. wieder ein
@@ -670,50 +727,137 @@ class PVSummaryPanel extends HTMLElement {
     return `<div class="card"><h3><ha-icon icon="${icon}"></ha-icon>${heading}<span class="hint">${legend}</span>${modes}${nav}</h3>${body}</div>`;
   }
 
-  // Tooltip und Zoom: Bewegen zeigt alle Werte, Ziehen wählt einen Zeitraum zum Heranzoomen
+  // Tooltip und Zoom: Bewegen zeigt alle Werte, Ziehen wählt einen Zeitraum zum Heranzoomen,
+  // Strg + Mausrad und zwei Finger zoomen, Doppelklick bzw. doppeltes Tippen setzt zurück
   _bindCurve() {
     for (const wrap of this._content.querySelectorAll(".curve-wrap")) {
       const chartId = wrap.dataset.chart;
       const svg = wrap.querySelector("svg");
-      const sel = svg.querySelector(".sel");
-      const px = (ev) => {
+      const sel = () => svg.querySelector(".sel");
+      const fx = (clientX) => {
         const c = this._curves[chartId];
         const rect = svg.getBoundingClientRect();
-        return Math.min(Math.max(((ev.clientX - rect.left) / rect.width) * c.W, c.L), c.W - c.R);
+        return ((clientX - rect.left) / rect.width) * c.W;
       };
+      const px = (ev) => { const c = this._curves[chartId]; return Math.min(Math.max(fx(ev.clientX), c.L), c.W - c.R); };
+      // Aktueller Ausschnitt (kann dem gezeichneten Diagramm einen Frame voraus sein)
+      const range = () => this._zoom ?? [this._dayStart, this._dayStart + 24 * 3600 * 1000];
+      const span = () => range()[1] - range()[0];
+      const timeAt = (x) => { const c = this._curves[chartId]; return range()[0] + ((x - c.L) / (c.W - c.L - c.R)) * span(); };
+      const resetZoom = () => { if (this._zoom) { this._hover = null; this._onNav("zoom-reset"); } };
+      const pointers = new Map();
+      let lastTap = 0;
+
       svg.addEventListener("pointerdown", (ev) => {
-        if (ev.button !== 0) return;
+        pointers.set(ev.pointerId, ev.clientX);
+        if (pointers.size === 2) {
+          // Zweiter Finger: Auswahl abbrechen, Zwei-Finger-Zoom beginnt
+          this._drag = null;
+          sel().style.display = "none";
+          const [a, b] = [...pointers.values()];
+          this._pinch = { chartId, dist: Math.max(Math.abs(a - b), 20), span: span(), tMid: timeAt(fx((a + b) / 2)) };
+          this._hover = null;
+          this._showHover(chartId);
+          return;
+        }
+        if (ev.button !== 0 || pointers.size > 2) return;
         this._drag = { chartId, x0: px(ev), x1: px(ev) };
         svg.setPointerCapture(ev.pointerId);
       });
       svg.addEventListener("pointermove", (ev) => {
         const c = this._curves[chartId];
+        if (pointers.has(ev.pointerId)) pointers.set(ev.pointerId, ev.clientX);
+        if (this._pinch?.chartId === chartId && pointers.size >= 2) {
+          const [a, b] = [...pointers.values()];
+          const p = this._pinch;
+          const newSpan = p.span * p.dist / Math.max(Math.abs(a - b), 20);
+          // Der Zeitpunkt zwischen den Fingern bleibt unter ihnen, Verschieben mit zwei Fingern inklusive
+          const frac = (fx((a + b) / 2) - c.L) / (c.W - c.L - c.R);
+          this._setZoom(p.tMid - frac * newSpan, p.tMid + (1 - frac) * newSpan);
+          this._zoomFrame(chartId);
+          return;
+        }
         const p = px(ev);
         if (this._drag?.chartId === chartId) {
           this._drag.x1 = p;
           const a = Math.min(this._drag.x0, p), b = Math.max(this._drag.x0, p);
-          sel.setAttribute("x", a); sel.setAttribute("width", b - a);
-          sel.style.display = b - a > 4 ? "" : "none";
+          sel().setAttribute("x", a); sel().setAttribute("width", b - a);
+          sel().style.display = b - a > 4 ? "" : "none";
         }
         this._hover = { chartId, t: c.tAt(p) };
         this._showHover(chartId);
       });
-      svg.addEventListener("pointerup", () => {
+      const end = (ev) => {
+        pointers.delete(ev.pointerId);
+        if (this._pinch) {
+          if (pointers.size < 2) { this._pinch = null; this._queueRender(); }
+          return;
+        }
         const drag = this._drag;
         this._drag = null;
-        sel.style.display = "none";
-        if (!drag || Math.abs(drag.x1 - drag.x0) < 8) return;
+        sel().style.display = "none";
+        if (ev.type !== "pointerup" || !drag) return;
+        if (Math.abs(drag.x1 - drag.x0) < 8) {
+          // Doppeltes Tippen am Handy setzt den Zoom zurück
+          if (ev.pointerType === "touch") {
+            if (ev.timeStamp - lastTap < 350) { lastTap = 0; resetZoom(); } else lastTap = ev.timeStamp;
+          }
+          return;
+        }
         const c = this._curves[chartId];
-        let a = c.tAt(Math.min(drag.x0, drag.x1)), b = c.tAt(Math.max(drag.x0, drag.x1));
-        if (b - a < 10 * 60000) { const mid = (a + b) / 2; a = mid - 5 * 60000; b = mid + 5 * 60000; }
-        this._zoom = [a, b];
+        const a = c.tAt(Math.min(drag.x0, drag.x1)), b = c.tAt(Math.max(drag.x0, drag.x1));
+        const m = (a + b) / 2;
+        if (b - a < ZOOM_MIN_MS) this._setZoom(m - ZOOM_MIN_MS / 2, m + ZOOM_MIN_MS / 2); else this._setZoom(a, b);
         this._hidden = {};
         this._hover = null;
         this._render();
-      });
+      };
+      svg.addEventListener("pointerup", end);
+      svg.addEventListener("pointercancel", end);
+      svg.addEventListener("dblclick", resetZoom);
       svg.addEventListener("pointerleave", () => { if (!this._drag) { this._hover = null; this._showHover(chartId); } });
+      svg.addEventListener("wheel", (ev) => {
+        const horizontal = Math.abs(ev.deltaX) > Math.abs(ev.deltaY);
+        if (!ev.ctrlKey && !ev.metaKey) {
+          // Gezoomt: Shift + Rad oder seitliches Wischen verschiebt den Ausschnitt
+          if (this._zoom && (ev.shiftKey || horizontal)) {
+            ev.preventDefault();
+            const rect = svg.getBoundingClientRect();
+            const dx = horizontal ? ev.deltaX : ev.deltaY;
+            const shift = (dx / rect.width) * span();
+            this._setZoom(range()[0] + shift, range()[1] + shift);
+            this._zoomFrame(chartId);
+          } else if (!horizontal) {
+            this._zoomHint(wrap);
+          }
+          return;
+        }
+        // Strg + Rad (auch Zwei-Finger-Geste am Touchpad): um die Stelle unter dem Zeiger zoomen
+        ev.preventDefault();
+        const t = timeAt(px(ev));
+        const factor = Math.exp(Math.max(-1, Math.min(1, ev.deltaY * (ev.deltaMode ? 0.05 : 0.002))));
+        const newSpan = span() * factor;
+        const frac = (t - range()[0]) / span();
+        this._setZoom(t - frac * newSpan, t + (1 - frac) * newSpan);
+        this._hover = { chartId, t };
+        this._zoomFrame(chartId);
+      }, { passive: false });
       if (this._hover?.chartId === chartId) this._showHover(chartId);
     }
+  }
+
+  // Hinweis „Strg + Mausrad zum Zoomen“, wenn ohne Strg über dem Diagramm gescrollt wird
+  _zoomHint(wrap) {
+    let hint = wrap.querySelector(".zhint");
+    if (!hint) {
+      hint = document.createElement("div");
+      hint.className = "zhint";
+      hint.textContent = TT("Strg + Mausrad zum Zoomen", "Use Ctrl + scroll to zoom");
+      wrap.appendChild(hint);
+    }
+    hint.classList.add("show");
+    clearTimeout(this._hintTimer);
+    this._hintTimer = setTimeout(() => hint.classList.remove("show"), 1200);
   }
 
   _showHover(chartId) {
@@ -723,25 +867,31 @@ class PVSummaryPanel extends HTMLElement {
     const g = wrap.querySelector(".hover");
     const tip = wrap.querySelector(".tip");
     if (this._hover?.chartId !== chartId) { g.style.display = "none"; tip.style.display = "none"; return; }
-    const t = Math.min(Math.max(this._hover.t, c.t0), Math.min(c.t1, c.now));
-    const xv = c.x(t);
+    // Auf den 5-Minuten-Abschnitt unter dem Zeiger einrasten
+    const tc = Math.min(Math.max(this._hover.t, c.t0), Math.min(c.t1, c.now) - 1);
+    const t = c.dayStart + Math.floor((tc - c.dayStart) / BIN_MS) * BIN_MS;
+    const xv = Math.min(Math.max(c.x(c.mid([t])), c.L), c.W - c.R);
     g.style.display = "";
     const line = g.querySelector(".hl");
     line.setAttribute("x1", xv); line.setAttribute("x2", xv);
     const dots = g.querySelectorAll("circle");
+    const signedW = (s, v) => {
+      const text = fmtW(Math.abs(v));
+      return s.signed ? (v > 1 ? `+${text} ${s.signed[0]}` : v < -1 ? `−${text} ${s.signed[1]}` : text) : text;
+    };
     const rows = c.series.map((s, i) => {
-      const v = valueAt(s.pts, t);
+      const b = binAt(s.bins, t);
       const dot = dots[i];
-      if (v === null) { dot.style.display = "none"; return ""; }
+      if (!b || b[0] !== t) { dot.style.display = "none"; return ""; }
       dot.style.display = "";
-      dot.setAttribute("cx", xv); dot.setAttribute("cy", c.y(c.stacked && s.cumAt ? s.cumAt(t) : v));
-      let text = fmtW(Math.abs(v));
-      if (s.signed) text = v > 1 ? `+${text} ${s.signed[0]}` : v < -1 ? `−${text} ${s.signed[1]}` : text;
-      return `<div class="r"><span class="dot" style="width:8px;height:8px;background:${s.color}"></span>${escapeHtml(s.label)}<b>${text}</b></div>`;
+      dot.setAttribute("cx", xv); dot.setAttribute("cy", c.y(c.stacked ? s.cumAt(t) : b[1]));
+      const range = Math.round(b[3] - b[2]) >= 1 ? `<span class="rng">${fmtWValue(b[2])} … ${fmtW(b[3])}</span>` : "";
+      return `<div class="r"><span class="dot" style="width:8px;height:8px;background:${s.color}"></span>${escapeHtml(s.label)}<b>${signedW(s, b[1])}</b></div>${range}`;
     }).join("");
-    const time = new Date(t).toLocaleTimeString(LOCALE(), { hour: "2-digit", minute: "2-digit" });
-    const total = c.stacked ? `<div class="r" style="border-top:1px solid var(--divider-color, rgba(0,0,0,.12));margin-top:2px;padding-top:2px">${TT("Summe", "Total")}<b>${fmtW(c.series.reduce((a, s) => a + Math.max(valueAt(s.pts, t) ?? 0, 0), 0))}</b></div>` : "";
-    tip.innerHTML = `<div class="time">${time}${TT(" Uhr", "")}</div>${rows}${total}`;
+    const hm = (ms) => new Date(ms).toLocaleTimeString(LOCALE(), { hour: "2-digit", minute: "2-digit" });
+    const sum = c.series.reduce((a, s) => { const b = binAt(s.bins, t); return a + (b && b[0] === t ? Math.max(b[1], 0) : 0); }, 0);
+    const total = c.stacked ? `<div class="r" style="border-top:1px solid var(--divider-color, rgba(0,0,0,.12));margin-top:2px;padding-top:2px">${TT("Summe", "Total")}<b>${fmtW(sum)}</b></div>` : "";
+    tip.innerHTML = `<div class="time">${hm(t)}–${hm(Math.min(t + BIN_MS, c.now))}${TT(" Uhr", "")} <span class="rng" style="display:inline">${TT("Ø 5 min", "5 min avg")}</span></div>${rows}${total}`;
     tip.style.display = "";
     const rect = wrap.getBoundingClientRect();
     const left = (xv / c.W) * rect.width;
@@ -857,18 +1007,26 @@ class PVSummaryPanel extends HTMLElement {
   _renderRecords() {
     const best = this._state("best_day");
     const rec = this._state("max_power_alltime");
-    const record = (key, icon, value, unit, label, when) => this._has(key) ? `<div class="rec">
-        <ha-icon icon="${icon}" style="color:${COLORS.pv};--mdc-icon-size:22px"></ha-icon>
-        <div class="big">${value}<small>${unit}</small></div>
-        <div class="sub">${label}${when ? " · " + when : ""}</div></div>` : "";
-    const avg = (key, label) => this._has(key) ? `<span>${label}<b>${fmt(this._num(key), 1)} kWh</b></span>` : "";
+    const record = (key, icon, value, unit, label, when) => this._has(key) ? `<div class="recrow click" data-key="${key}">
+        <ha-icon icon="${icon}" style="color:${COLORS.pv};--mdc-icon-size:20px"></ha-icon>
+        <span>${label}${when ? ` <span class="muted">${when}</span>` : ""}</span>
+        <b>${value}<small>${unit}</small></b></div>` : "";
+    // Durchschnitte als Balken im Verhältnis zum besten Tag
+    const bestV = this._num("best_day");
+    const avg = (key, label) => {
+      if (!this._has(key)) return "";
+      const v = this._num(key);
+      const pct = bestV > 0 && v !== null ? Math.min(100, Math.max(0, (v / bestV) * 100)) : 0;
+      return `<div class="avgrow click" data-key="${key}"><span class="muted">${label}</span>
+        <div class="bar"><div style="width:${pct.toFixed(1)}%;background:${COLORS.pv}"></div></div>
+        <b>${fmt(v, 1)}<small>kWh</small></b></div>`;
+    };
     const maxW = this._num("max_power_alltime");
-    return `<div class="card"><h3><ha-icon icon="mdi:trophy-outline"></ha-icon>${TT("Durchschnitt und Rekorde", "Averages and records")}</h3>
-      <div class="rec2">
-        ${record("best_day", "mdi:trophy", fmt(this._num("best_day"), 1), "kWh", TT("Bester Tag", "Best day"), best?.attributes?.date ? fmtDate(best.attributes.date) : "")}
+    return `<div class="card reccard"><h3><ha-icon icon="mdi:trophy-outline"></ha-icon>${TT("Durchschnitt und Rekorde", "Averages and records")}</h3>
+      <div class="recs">
+        ${record("best_day", "mdi:trophy", fmt(bestV, 1), "kWh", TT("Bester Tag", "Best day"), best?.attributes?.date ? fmtDate(best.attributes.date) : "")}
         ${record("max_power_alltime", "mdi:flash", fmtWValue(maxW), fmtWUnit(maxW), TT("Leistungsrekord", "Power record"), rec?.attributes?.time ? fmtDate(rec.attributes.time) : "")}
-      </div>
-      <div class="avgs">
+        <div class="sep"></div>
         ${avg("avg_daily_7", TT("Ø 7 Tage", "Avg 7 days"))}
         ${avg("avg_daily_30", TT("Ø 30 Tage", "Avg 30 days"))}
         ${avg("avg_daily_365", TT("Ø 365 Tage", "Avg 365 days"))}
@@ -1056,6 +1214,38 @@ function barRect(x, w, v, maxV, base, height, color, title, rx) {
 }
 
 // Zuletzt bekannter Wert einer Reihe zum Zeitpunkt t (Binärsuche), null vor dem ersten Messpunkt
+// Stufenverlauf [[ms, Wert], …] in 5-Minuten-Abschnitte [start, Mittel, Min, Max] zerlegen.
+// Das Mittel ist nach der Zeit gewichtet; Abschnitte ohne Wert fehlen.
+function binSeries(pts, from, to) {
+  const out = [];
+  let k = 0;
+  while (k < pts.length && pts[k][0] <= from) k++;
+  let cur = k ? pts[k - 1][1] : null;
+  for (let b = from; b < to; b += BIN_MS) {
+    const e = Math.min(b + BIN_MS, to);
+    let t = b, sum = 0, dur = 0, lo = cur ?? Infinity, hi = cur ?? -Infinity;
+    while (k < pts.length && pts[k][0] < e) {
+      const [tk, vk] = pts[k++];
+      if (cur !== null) { sum += cur * (tk - t); dur += tk - t; }
+      cur = vk; t = Math.max(tk, b);
+      lo = Math.min(lo, vk); hi = Math.max(hi, vk);
+    }
+    if (cur !== null) { sum += cur * (e - t); dur += e - t; }
+    if (dur > 0) out.push([b, sum / dur, lo, hi]);
+  }
+  return out;
+}
+
+// Abschnitt, in dem t liegt (oder null)
+function binAt(bins, t) {
+  let lo = 0, hi = bins.length - 1;
+  while (lo <= hi) {
+    const m = (lo + hi) >> 1;
+    if (t < bins[m][0]) hi = m - 1; else if (t >= bins[m][0] + BIN_MS) lo = m + 1; else return bins[m];
+  }
+  return null;
+}
+
 function valueAt(pts, t) {
   let lo = 0, hi = pts.length - 1, found = -1;
   while (lo <= hi) {
