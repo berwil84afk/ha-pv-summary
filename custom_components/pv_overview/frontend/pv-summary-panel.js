@@ -76,14 +76,6 @@ const STYLE = `
   .navbtn { background:transparent; border:1px solid var(--divider-color, rgba(0,0,0,.12)); border-radius:999px; color:var(--secondary-text-color); font:inherit; font-size:12px; padding:2px 10px; cursor:pointer; }
   .navbtn.active { background:var(--secondary-background-color, rgba(0,0,0,.06)); color:var(--primary-text-color); font-weight:500; }
   .navbtn:disabled { opacity:.35; cursor:default; }
-  .flowgrid { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:center; }
-  .donut { display:grid; gap:6px; justify-items:center; font-size:12px; }
-  .donut svg { width:110px; }
-  .donutrow { display:flex; flex-direction:column; align-items:center; gap:6px; }
-  .donut .legend { display:grid; gap:2px; justify-items:start; }
-  .donut .legend span { display:flex; align-items:center; gap:6px; white-space:nowrap; }
-  .donut .legend b { font-weight:500; margin-left:4px; }
-  @media (max-width: 700px) { .flowgrid { grid-template-columns:1fr; } .donutrow { flex-direction:row; justify-content:center; gap:20px; } .donut svg { width:96px; } }
   .views { display:inline-flex; border:1px solid var(--divider-color, rgba(0,0,0,.12)); border-radius:999px; overflow:hidden; margin-left:8px; }
   .views button { background:transparent; border:0; color:var(--secondary-text-color); font:inherit; font-size:13px; padding:5px 14px; cursor:pointer; }
   .views button.active { background:var(--secondary-background-color, rgba(0,0,0,.06)); color:var(--primary-text-color); font-weight:500; }
@@ -473,7 +465,11 @@ class PVSummaryPanel extends HTMLElement {
 
     const nodes = {
       pv: { x: 60, y: 110, color: COLORS.pv, icon: "mdi:solar-power-variant", label: "PV", value: fmtW(pv), key: "power" },
-      house: { x: 380, y: 110, color: COLORS.house, icon: "mdi:home", label: house !== null ? "Haus" : "Haus/Netz", value: house !== null ? fmtW(house) : "≈ " + fmtW(need), key: house !== null ? "house_power" : null },
+      house: { x: 380, y: 110, color: COLORS.house, arcs: house ? [
+        { label: "PV", color: COLORS.pv, v: pvToHouse },
+        { label: "Akku", color: COLORS.bat, v: batToHouse },
+        { label: "Netz", color: COLORS.grid, v: gridToHouse },
+      ] : null, icon: "mdi:home", label: house !== null ? "Haus" : "Haus/Netz", value: house !== null ? fmtW(house) : "≈ " + fmtW(need), key: house !== null ? "house_power" : null },
       // Leistung öffnet die Lade-/Entladeleistung, die Prozentzahl den Akkustand
       bat: { x: 220, y: 195, color: soc !== null ? socColor(soc) : COLORS.bat, fill: soc, icon: "mdi:home-battery", label: soc !== null ? `${fmt(soc, 0)} %` : "Akku", value: bat !== null ? (bat > 0 ? "+" : bat < 0 ? "−" : "") + fmtW(Math.abs(bat)) : "", key: this._has("battery_power") ? "battery_power" : soc !== null ? "battery_soc" : null, labelKey: bat !== null && soc !== null ? "battery_soc" : null },
       grid: { x: 220, y: 45, color: COLORS.grid, icon: "mdi:transmission-tower", label: grid === null || Math.abs(grid) <= 1 ? "Netz" : grid < 0 ? "Einspeisung" : "Bezug", value: grid !== null ? fmtW(Math.abs(grid)) : "", key: this._has("grid_power") ? "grid_power" : null },
@@ -495,40 +491,16 @@ class PVSummaryPanel extends HTMLElement {
     if (showGrid && showBat) lines += line("bat", "grid", batToGrid, gridToBat, COLORS.bat, COLORS.grid);
     const circle = (n, show = true) => !show ? "" : `
       <g class="${n.key ? "click" : ""}" ${n.key ? `data-key="${n.key}"` : ""}>
-        <circle cx="${n.x}" cy="${n.y}" r="40" fill="var(--card-background-color, #fff)" stroke="${n.color}" stroke-width="3"/>
+        <circle cx="${n.x}" cy="${n.y}" r="40" fill="var(--card-background-color, #fff)" stroke="${n.color}" stroke-width="${n.arcs ? 4 : 3}"/>
+        ${n.arcs ? sourceArcs(n) : ""}
         ${n.fill != null ? `<clipPath id="pvs-fill"><circle cx="${n.x}" cy="${n.y}" r="38.5"/></clipPath><rect x="${n.x - 40}" y="${(n.y + 40 - 0.8 * Math.min(Math.max(n.fill, 0), 100)).toFixed(1)}" width="80" height="${(0.8 * Math.min(Math.max(n.fill, 0), 100)).toFixed(1)}" fill="${n.color}" fill-opacity="0.3" clip-path="url(#pvs-fill)"/>` : ""}
         <foreignObject x="${n.x - 12}" y="${n.y - 32}" width="24" height="24"><ha-icon icon="${n.icon}" style="color:${n.color};--mdc-icon-size:22px"></ha-icon></foreignObject>
         <text x="${n.x}" y="${n.y + 8}" text-anchor="middle" class="strong" style="font-size:13px">${n.value || n.label}</text>
         <text x="${n.x}" y="${n.y + 23}" text-anchor="middle" style="font-size:${n.labelKey ? 12 : 10}px" ${n.labelKey ? `class="click strong" data-key="${n.labelKey}"` : ""}>${n.value ? n.label : ""}</text>
       </g>`;
     const hint = house === null ? `<span class="hint">Netz bzw. Hausverbrauch nicht eingerichtet</span>` : "";
-    const flow = `<svg viewBox="0 ${showGrid ? 0 : 60} 440 ${(showBat ? 240 : 160) - (showGrid ? 0 : 60)}">${lines}${circle(nodes.grid, showGrid)}${circle(nodes.pv)}${circle(nodes.house)}${circle(nodes.bat, showBat)}</svg>`;
-    // Ring: woher der Hausverbrauch gerade kommt
-    const donut = house !== null ? this._renderDonut([
-      { label: "PV", color: COLORS.pv, v: pvToHouse },
-      { label: "Akku", color: COLORS.bat, v: batToHouse },
-      { label: "Netz", color: COLORS.grid, v: gridToHouse },
-    ], house) : "";
-    return `<div class="card flowcard"><h3><ha-icon icon="mdi:transit-connection-variant"></ha-icon>Energiefluss jetzt${hint}</h3>
-      ${donut ? `<div class="flowgrid">${flow}${donut}</div>` : flow}</div>`;
-  }
-
-  _renderDonut(parts, total) {
-    const r = 44, c = 2 * Math.PI * r;
-    const sum = parts.reduce((a, p) => a + p.v, 0);
-    let offset = 0;
-    const arcs = parts.map((p) => {
-      const len = sum > 0 ? (p.v / sum) * c : 0;
-      const arc = len > 0.5 ? `<circle cx="60" cy="60" r="${r}" fill="none" stroke="${p.color}" stroke-width="18" stroke-dasharray="${len.toFixed(2)} ${(c - len).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90 60 60)"/>` : "";
-      offset += len;
-      return arc;
-    }).join("");
-    const legend = parts.map((p) => `<span><span class="dot" style="width:8px;height:8px;background:${p.color}"></span>${p.label}<b>${fmt(sum > 0 ? (p.v / sum) * 100 : 0, 0)} %</b></span>`).join("");
-    return `<div class="donut" title="Hausverbrauch jetzt aus PV, Akku und Netz">
-      <div class="muted">Haus jetzt aus</div>
-      <div class="donutrow"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="${r}" fill="none" stroke="var(--secondary-background-color, rgba(0,0,0,.06))" stroke-width="18"/>${arcs}
-        <text x="60" y="64" text-anchor="middle" class="strong" style="font-size:14px">${fmtW(total)}</text></svg>
-      <div class="legend">${legend}</div></div></div>`;
+    const flow = `<svg viewBox="0 ${showGrid ? 0 : 60} 440 ${(showBat ? 240 : 175) - (showGrid ? 0 : 60)}">${lines}${circle(nodes.grid, showGrid)}${circle(nodes.pv)}${circle(nodes.house)}${circle(nodes.bat, showBat)}</svg>`;
+    return `<div class="card flowcard"><h3><ha-icon icon="mdi:transit-connection-variant"></ha-icon>Energiefluss jetzt${hint}</h3>${flow}</div>`;
   }
 
   _renderKpis() {
@@ -976,6 +948,22 @@ function ticks(min, max) {
   const out = [];
   for (let v = Math.ceil(min / step) * step; v <= max + 1e-9; v += step) out.push(Math.round(v * 1000) / 1000 || 0); // "|| 0" vermeidet die Anzeige "-0"
   return out;
+}
+
+// Rand des Haus-Knotens in Bögen je Quelle (PV, Akku, Netz) und Prozentzeile darunter
+function sourceArcs(n) {
+  const r = 40, c = 2 * Math.PI * r;
+  const sum = n.arcs.reduce((a, p) => a + p.v, 0);
+  if (sum <= 0) return "";
+  let offset = 0;
+  const arcs = n.arcs.map((p) => {
+    const len = (p.v / sum) * c;
+    const arc = len > 0.5 ? `<circle cx="${n.x}" cy="${n.y}" r="${r}" fill="none" stroke="${p.color}" stroke-width="4" stroke-dasharray="${len.toFixed(2)} ${(c - len).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90 ${n.x} ${n.y})"><title>${p.label}: ${fmt((p.v / sum) * 100, 0)} %</title></circle>` : "";
+    offset += len;
+    return arc;
+  }).join("");
+  const shares = n.arcs.filter((p) => p.v / sum >= 0.005).map((p) => `${p.label} ${fmt((p.v / sum) * 100, 0)}`).join(" · ");
+  return `${arcs}<text x="${n.x}" y="${n.y + 56}" text-anchor="middle" style="font-size:11px">${shares} %</text>`;
 }
 
 // Farbe des Akkustands: unter 25 % rot, bis 75 % gelb, darüber grün
