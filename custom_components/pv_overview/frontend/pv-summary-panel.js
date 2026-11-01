@@ -72,6 +72,8 @@ const STYLE = `
   .empty { padding:40px 16px; text-align:center; color:var(--secondary-text-color); }
   .click { cursor:pointer; }
   .card h3 { flex-wrap:wrap; }
+  .lg { background:none; border:0; color:inherit; font:inherit; cursor:pointer; display:inline-flex; align-items:center; gap:4px; margin-left:10px; padding:0; }
+  .lg.off { opacity:.45; text-decoration:line-through; }
   .navbtns { display:inline-flex; gap:4px; align-items:center; }
   .navbtn { background:transparent; border:1px solid var(--divider-color, rgba(0,0,0,.12)); border-radius:999px; color:var(--secondary-text-color); font:inherit; font-size:12px; padding:2px 10px; cursor:pointer; }
   .navbtn.active { background:var(--secondary-background-color, rgba(0,0,0,.06)); color:var(--primary-text-color); font-weight:500; }
@@ -120,6 +122,7 @@ class PVSummaryPanel extends HTMLElement {
     this._prodMode = "30";  // "30" = letzte 30 Tage, "month" = ein Kalendermonat
     this._prodMonth = null;  // erster Tag des gewählten Monats
     this._monthDays = [];
+    this._hidden = {};       // Diagramm -> Set der ausgeblendeten Reihen (nur bis zum nächsten Tag/Zoom)
   }
 
   set hass(hass) {
@@ -248,6 +251,14 @@ class PVSummaryPanel extends HTMLElement {
       this._render();
       return;
     }
+    const toggle = ev.target.closest("[data-series]");
+    if (toggle) {
+      const set = (this._hidden[toggle.dataset.chart] ||= new Set());
+      if (set.has(toggle.dataset.series)) set.delete(toggle.dataset.series); else set.add(toggle.dataset.series);
+      this._hover = null;
+      this._render();
+      return;
+    }
     const nav = ev.target.closest("[data-nav]");
     if (nav) {
       this._onNav(nav.dataset.nav);
@@ -267,14 +278,17 @@ class PVSummaryPanel extends HTMLElement {
       const next = startOfDay(cur + (action === "day-prev" ? -1 : 1) * 36e5 * 24 + 36e5 * 2);
       this._day = next >= today ? null : next;
       this._zoom = null;
+      this._hidden = {};
       this._hover = null;
       this._fetchCurveHistory();
     } else if (action === "day-today") {
       this._day = null;
       this._zoom = null;
+      this._hidden = {};
       this._fetchCurveHistory();
     } else if (action === "zoom-reset") {
       this._zoom = null;
+      this._hidden = {};
       this._render();
     } else if (action === "prod-30" || action === "prod-month") {
       this._prodMode = action === "prod-30" ? "30" : "month";
@@ -537,7 +551,8 @@ class PVSummaryPanel extends HTMLElement {
     const dayStart = this._dayStart, today = this._isToday;
     const now = today ? Date.now() : dayStart + 24 * 3600 * 1000;
     const [t0, t1] = this._zoom ?? [dayStart, dayStart + 24 * 3600 * 1000];
-    const series = [];
+    const hidden = this._hidden[chartId] || new Set();
+    const withData = [];
     for (const def of defs) {
       const id = this._id(def.key);
       const all = id ? (this._history[id] || []).slice() : [];
@@ -550,8 +565,9 @@ class PVSummaryPanel extends HTMLElement {
       const pts = all.filter((p) => p[0] > t0 && p[0] <= end);
       if (start !== null) pts.unshift([t0, start]);
       if (pts.length && pts[pts.length - 1][0] < end) pts.push([end, pts[pts.length - 1][1]]);
-      if (pts.length) series.push({ ...def, pts, all });
+      if (pts.length) withData.push({ ...def, pts, all });
     }
+    const series = withData.filter((s) => !hidden.has(s.key));
 
     const W = this._chartWidth(1), H = 220, L = 44, R = 8, T = 10, B = 24;
     const vals = series.flatMap((s) => s.pts.map((p) => p[1]));
@@ -596,7 +612,8 @@ class PVSummaryPanel extends HTMLElement {
     this._curves[chartId] = { W, t0, t1, now, x, y, tAt, L, R, series: series.map((s) => ({ ...s, pts: s.all })) };
     const sel = `<rect class="sel" x="0" y="${T}" width="0" height="${H - T - B}" fill="var(--primary-color, #03a9f4)" fill-opacity="0.15" style="display:none"/>`;
     const hover = `<g class="hover" style="display:none"><line class="hl" y1="${T}" y2="${H - B}" stroke="var(--primary-text-color)" stroke-opacity="0.4" stroke-width="1"/>${series.map((s) => `<circle r="4" fill="${s.color}" stroke="var(--card-background-color,#fff)" stroke-width="2"/>`).join("")}</g>`;
-    const legend = series.map((s) => `<span style="display:inline-flex;align-items:center;gap:4px;margin-left:10px"><span style="width:10px;height:10px;border-radius:2px;background:${s.color}"></span>${escapeHtml(s.label)}</span>`).join("");
+    // Legende: Klick blendet die Linie aus bzw. wieder ein
+    const legend = withData.map((s) => `<button class="lg ${hidden.has(s.key) ? "off" : ""}" data-chart="${chartId}" data-series="${escapeHtml(s.key)}" title="${hidden.has(s.key) ? "Einblenden" : "Ausblenden"}"><span style="width:10px;height:10px;border-radius:2px;background:${s.color}"></span>${escapeHtml(s.label)}</button>`).join("");
     const heading = today ? `${title} heute` : `${title} am ${new Date(dayStart).toLocaleDateString(LOCALE(), { day: "2-digit", month: "2-digit", year: "numeric" })}`;
     const nav = `<span class="navbtns">
         ${this._zoom ? `<button class="navbtn" data-nav="zoom-reset">Zoom zurücksetzen</button>` : ""}
@@ -604,7 +621,7 @@ class PVSummaryPanel extends HTMLElement {
         <button class="navbtn ${today ? "active" : ""}" data-nav="day-today">Heute</button>
         <button class="navbtn" data-nav="day-next" title="Nächster Tag" ${today ? "disabled" : ""}>›</button></span>`;
     const empty = today ? "Noch keine Verlaufsdaten für heute." : "Keine Daten vorhanden.";
-    const body = series.length ? `<div class="curve-wrap" data-chart="${chartId}"><svg viewBox="0 0 ${W} ${H}">${grid}${paths}${sel}${hover}</svg><div class="tip" style="display:none"></div></div>` : `<div class="empty">${empty}</div>`;
+    const body = !series.length && withData.length ? `<div class="empty">Alle Linien ausgeblendet.</div>` : series.length ? `<div class="curve-wrap" data-chart="${chartId}"><svg viewBox="0 0 ${W} ${H}">${grid}${paths}${sel}${hover}</svg><div class="tip" style="display:none"></div></div>` : `<div class="empty">${empty}</div>`;
     return `<div class="card"><h3><ha-icon icon="${icon}"></ha-icon>${heading}<span class="hint">${legend}</span>${nav}</h3>${body}</div>`;
   }
 
@@ -645,6 +662,7 @@ class PVSummaryPanel extends HTMLElement {
         let a = c.tAt(Math.min(drag.x0, drag.x1)), b = c.tAt(Math.max(drag.x0, drag.x1));
         if (b - a < 10 * 60000) { const mid = (a + b) / 2; a = mid - 5 * 60000; b = mid + 5 * 60000; }
         this._zoom = [a, b];
+        this._hidden = {};
         this._hover = null;
         this._render();
       });
