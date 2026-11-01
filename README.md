@@ -1,95 +1,103 @@
 <img src="custom_components/pv_overview/brand/icon.png" alt="PV Summary" width="128" align="right">
 
-# PV Summary – Home Assistant Integration
+# PV Summary, Home Assistant Integration
 
-Du gibst nur **einen Sensor mit der aktuellen PV-Leistung** (W oder kW) an – die Integration rechnet daraus Energie und Statistiken. Optional kommen Netz-Zähler (oder Hausverbrauch), beliebig viele Akkus und einzelne PV-Strings dazu. Ein eigenes Dashboard erscheint automatisch als **PV Summary** in der Seitenleiste.
+[Deutsche Version](README.de.md)
 
-<img src="docs/dashboard.jpg" alt="PV Summary Dashboard mit Beispieldaten" width="640">
+You only provide **one sensor with the current PV power** (W or kW), and the integration calculates energy and statistics from it. Optionally you can add a grid meter (or house consumption), any number of batteries and individual PV strings. A dedicated dashboard appears automatically as **PV Summary** in the sidebar.
 
-## Installation über HACS
+Requires Home Assistant **2025.3** or newer. Setup and dashboard are available in English and German and follow the Home Assistant language setting.
 
-1. HACS → Menü (⋮) → **Benutzerdefinierte Repositories**
-2. Repository `https://github.com/berwil84afk/ha-pv-summary`, Typ **Integration** → Hinzufügen
-3. „PV Summary“ in HACS suchen → Herunterladen → Home Assistant neu starten
-4. **Einstellungen → Geräte & Dienste → Integration hinzufügen → „PV Summary“**
+<img src="docs/dashboard.jpg" alt="PV Summary dashboard with sample data" width="640">
 
-## Manuelle Installation
+## Installation via HACS
 
-1. Ordner `custom_components/pv_overview` nach `/config/custom_components/pv_overview` kopieren
-   (z. B. mit dem File-Editor- oder Samba-Add-on).
-2. Home Assistant neu starten.
-3. **Einstellungen → Geräte & Dienste → Integration hinzufügen → „PV Summary“**.
-4. Name, PV-Leistungssensor, Schwelle (Standard 10 W) und optional Netzleistung (Zähler), Hausverbrauch und bisherigen Zählerstand eingeben.
+1. HACS → menu (⋮) → **Custom repositories**
+2. Repository `https://github.com/berwil84afk/ha-pv-summary`, type **Integration** → Add
+3. Search for "PV Summary" in HACS → Download → restart Home Assistant
+4. **Settings → Devices & services → Add integration → "PV Summary"**
 
-Später änderbar über **Konfigurieren** an der Integration: Quellsensor, Netz, Hausverbrauch und Schwelle. Akkus und Strings legst du an der Integration über **Akku hinzufügen** und **String hinzufügen** an.
+## Manual installation
 
-## Netz und Hausverbrauch (optional)
+1. Copy the folder `custom_components/pv_overview` to `/config/custom_components/pv_overview`
+   (for example with the File editor or Samba add-on).
+2. Restart Home Assistant.
+3. **Settings → Devices & services → Add integration → "PV Summary"**.
+4. Enter a name, the PV power sensor, the threshold (default 10 W) and optionally the grid power (meter), house consumption and previous total production.
 
-- **Netzleistung (Zähler)**: Sensor am Netz-Zähler, positiv = Bezug, negativ = Einspeisung (W oder kW). Meldet dein Zähler es umgekehrt, setze **Vorzeichen Netz umkehren**. Daraus entstehen *Netzleistung*, *Netzbezug heute/gesamt* und *Einspeisung heute/gesamt*; die Gesamt-Zähler kannst du im **Energie-Dashboard** unter „Stromnetz“ eintragen.
-- **Hausverbrauch** wird dann berechnet: Haus = PV + Netz − Akku (Akku positiv beim Laden). Daraus entstehen *Hausverbrauch*, *Hausverbrauch heute* und *Hausverbrauch gesamt*.
-- Hast du stattdessen einen Sensor, der wirklich den Verbrauch des Hauses misst, trage ihn unter **Hausverbrauch** ein. Ohne Netz-Zähler wird die Netzleistung dann daraus berechnet (Netz = Haus + Akku − PV).
-- Beim Update auf v1.7 wird ein bisher unter „Hausverbrauch“ eingetragener Sensor einmalig ins Feld **Netzleistung (Zähler)** übernommen, weil das bis v1.6 meist der Zähler war. Misst dein Sensor wirklich den Hausverbrauch, trag ihn unter **Konfigurieren** wieder dort ein und leere das Netz-Feld.
+You can change the source sensor, grid, house consumption and threshold later via **Configure** on the integration. Batteries and strings are added on the integration via **Add battery** and **Add string**.
 
-## Akkus (optional, beliebig viele)
+## Grid and house consumption (optional)
 
-An der Integration unter **Einstellungen → Geräte & Dienste → PV Summary** legst du über **Akku hinzufügen** einen oder mehrere Akkus an. Jedes Feld ist optional:
+- **Grid power (meter)**: sensor at the grid meter, positive = import, negative = export (W or kW). If your meter reports it the other way round, enable **Invert grid sign**. This creates *Grid import today/total* and *Grid export today/total*. You can add the total counters to the **Energy dashboard** under "Electricity grid".
+- **House consumption** is then calculated: house = PV + grid − battery (battery positive while charging). This creates *House consumption*, *House consumption today* and *House consumption total*.
+- If you have a sensor that really measures the consumption of the house instead, enter it under **House consumption**. Without a grid meter the grid power is then calculated from it (grid = house + battery − PV).
+- The *Grid power* sensor exists in both cases, with a grid meter or with house consumption. Grid import and export as energy are only available with a grid meter.
+- When updating to v1.7, a sensor previously entered as "house consumption" is moved once to the **Grid power (meter)** field, because up to v1.6 that was usually the meter. If your sensor really measures the house consumption, enter it there again under **Configure** and clear the grid field.
 
-| Feld | Erwartet |
+## Batteries (optional, any number)
+
+On the integration under **Settings → Devices & services → PV Summary** you add one or more batteries via **Add battery**. Every field is optional:
+
+| Field | Expects |
 |---|---|
-| Akkustand | Sensor in % |
-| Lade-/Entladeleistung | **ein** Sensor mit Vorzeichen in W oder kW (positiv = Laden) |
-| Vorzeichen umkehren | einschalten, wenn dein Sensor beim Entladen positive Werte meldet |
-| Kapazität | kWh, gewichtet den gemeinsamen Akkustand |
-| Akkuspannung, Akkutemperatur | Sensoren in V/mV bzw. °C/°F |
+| State of charge | sensor in % |
+| Charge/discharge power | **one** signed sensor in W or kW (positive = charging) |
+| Invert sign | enable if your sensor reports positive values while discharging |
+| Capacity | kWh, weights the combined state of charge |
+| Battery voltage, battery temperature | sensors in V/mV or °C/°F |
 
-- Jeder Akku bekommt ein eigenes Gerät mit *Akkustand*, *Akkuleistung*, *Akku geladen heute*, *Akku entladen heute* und, falls angegeben, Spannung und Temperatur.
-- An der Anlage gibt es die Summen aller Akkus: *Akkuleistung*, *Akku Lade-/Entladeleistung*, *Akku geladen/entladen heute und gesamt* sowie den gemeinsamen *Akkustand*. Der gemeinsame Akkustand ist nach Kapazität gewichtet, wenn bei allen Akkus eine Kapazität eingetragen ist, sonst der einfache Durchschnitt.
-- *Akku geladen gesamt* und *Akku entladen gesamt* kannst du im **Energie-Dashboard** unter „Batteriespeicher“ eintragen.
-- Ein bis v1.5 eingerichteter Akku wird beim Update automatisch als „Akku“ übernommen.
+- Each battery gets its own device with *Battery level*, *Battery power*, *Battery charged today*, *Battery discharged today* and, if configured, voltage and temperature.
+- The system device has the sums of all batteries: *Battery power*, *Battery charging/discharging power*, *Battery charged/discharged today and total* and the combined *Battery level*. The combined level is weighted by capacity if every battery has a capacity, otherwise it is the plain average.
+- You can add *Battery charged total* and *Battery discharged total* to the **Energy dashboard** under "Home battery storage".
+- A battery set up with v1.5 or earlier is taken over automatically as "Akku" when updating.
 
 ## Strings (optional)
 
-Über **String hinzufügen** trägst du einzelne PV-Strings ein: Leistung (Pflicht), Spannung und Strom (optional). Jeder String bekommt ein eigenes Gerät mit *Leistung*, *Produktion heute*, *Produktion gesamt* und gegebenenfalls *Spannung* und *Strom*. Sobald mindestens ein String eingetragen ist, hat das Dashboard einen zusätzlichen Tab **Strings**.
+Via **Add string** you enter individual PV strings: power (required), voltage and current (optional). Each string gets its own device with *Power*, *Production today*, *Production total* and, if configured, *Voltage* and *Current*. As soon as at least one string exists, the dashboard has an additional **Strings** tab.
 
-## Erzeugte Sensoren
+## Sensors
 
-| Sensor | Einheit | Beschreibung |
+| Sensor | Unit | Description |
 |---|---|---|
-| Aktuelle Leistung | W | Leistung des Quellsensors in W (kW wird umgerechnet, negativ → 0) – Grundlage aller Berechnungen, sofort aktualisiert |
-| Gesamtproduktion | kWh | Fortlaufender Zähler – im **Energie-Dashboard** als Solarproduktion nutzbar |
-| Produktion heute / gestern | kWh | `gestern` hat Attribut `history` mit den letzten 30 Tagen |
-| Produktion diese Woche / dieser Monat / letzter Monat / dieses Jahr | kWh | `dieser Monat` hat Attribut `months` mit Monatswerten |
-| Spitzenleistung heute | W | Attribut `time` = Zeitpunkt |
-| Spitzenleistung Rekord | W | Allzeit-Maximum mit Zeitpunkt |
-| Durchschnittsleistung heute | W | Ø Leistung während der Produktionszeit |
-| Produktionszeit heute | h | Zeit über der Schwelle |
-| Ø Tagesproduktion 7 / 30 / 365 Tage / gesamt | kWh/d | Nur abgeschlossene Tage |
-| Bester Tag | kWh | Attribut `date` |
-| Hausverbrauch / heute / gesamt | W / kWh | mit Netz-Zähler berechnet oder gemessen |
-| Netzleistung | W | positiv = Bezug, negativ = Einspeisung |
-| Netzbezug / Einspeisung heute und gesamt | kWh | nur mit Netz-Zähler |
-| Akku …, String … | | siehe oben |
+| Current power | W | Power of the source sensor in W (kW is converted, negative → 0). Basis of all calculations, updated immediately |
+| Total production | kWh | Continuous counter, usable as solar production in the **Energy dashboard** |
+| Production today / yesterday | kWh | `yesterday` has the attribute `history` with the last 30 days |
+| Production this week / this month / last month / this year | kWh | `this month` has the attribute `months` with monthly values |
+| Peak power today | W | attribute `time` = time of the peak |
+| Peak power record | W | all-time maximum with time |
+| Average power today | W | average power during production time |
+| Production time today | h | time above the threshold |
+| Avg daily production 7 / 30 / 365 days / overall | kWh/d | completed days only |
+| Best day | kWh | attribute `date` |
+| House consumption / today / total | W / kWh | calculated with a grid meter, or measured |
+| Grid power | W | positive = import, negative = export; with a grid meter or house consumption |
+| Grid import / export today and total | kWh | grid meter only |
+| Battery …, string … | | see above |
 
-## Wie gerechnet wird
+## How it calculates
 
-- Energie = Leistung × Zeit (Riemann-Summe, Wert gilt bis zur nächsten Änderung), aktualisiert alle 30 s.
-- kW/MW-Sensoren werden automatisch in W umgerechnet, negative Werte als 0 gewertet.
-- Ist der Quellsensor `unavailable`, wird über die Lücke **nicht** integriert. Während Home Assistant aus ist, wird nichts gezählt.
-- Tage, Wochen (ISO, ab Montag), Monate und Jahre werden um Mitternacht abgeschlossen – auch wenn HA über Mitternacht aus war.
-- Der Tag der Ersteinrichtung ist unvollständig und zählt nicht in die Durchschnitte.
-- Daten liegen in `/config/.storage/pv_overview.<entry_id>` und überleben Neustarts.
+- Energy = power × time (Riemann sum, a value applies until the next change), updated every 30 s.
+- kW/MW sensors are converted to W automatically. Negative values of PV, house consumption and strings count as 0. Grid and battery keep their sign.
+- If the source sensor is `unavailable`, the gap is **not** integrated. Nothing is counted while Home Assistant is off.
+- Days, weeks (ISO, starting Monday), months and years are closed at midnight, even if HA was off over midnight.
+- The day of the initial setup is incomplete and does not count towards the averages.
+- Data is stored in `/config/.storage/pv_overview.<entry_id>` and survives restarts.
 
-## Eigenes Dashboard
+## Dashboard
 
-Die Integration bringt ihr eigenes Dashboard mit. Es erscheint nach dem Einrichten automatisch als **PV Summary** in der Seitenleiste – ohne HACS-Karten, ohne YAML und ohne Anpassen von Entity-IDs.
+The integration brings its own dashboard. After setup it appears automatically as **PV Summary** in the sidebar, without HACS cards, without YAML and without adjusting entity IDs. Texts are shown in German if Home Assistant is set to German, otherwise in English.
 
-- **Energiefluss jetzt**: PV, Haus, Akku und Netz mit animierten Linien (Netz und Haus nur mit Netz-Zähler oder Hausverbrauch). Die Linien folgen einer echten Bilanz: PV lädt zuerst den Akku, dann versorgt sie das Haus, der Rest geht ins Netz; ein entladender Akku versorgt das Haus und speist den Überschuss ein. Jeder Knoten ist klickbar, beim Akku Leistung und Akkustand getrennt. Der Akku-Knoten füllt sich mit dem Akkustand (unter 25 % rot, bis 75 % gelb, darüber grün). Der Rand des Haus-Knotens ist in farbige Bögen geteilt und zeigt, woher der Hausverbrauch gerade kommt (PV, Akku, Netz), mit den Prozenten darunter.
-- **Kennzahlen**: Heute (mit Vergleich zum Ø der letzten 30 Tage), Gestern, Spitze heute, Ø Leistung, Laufzeit, Haus heute
-- **Leistung heute**: Tageskurve für PV, Haus, Akku und Netz mit markierter Spitze und Tooltip beim Überfahren. Mit ‹ Heute › blätterst du durch vergangene Tage, durch Ziehen mit der Maus zoomst du in einen Zeitraum. Die Achse richtet sich nach dem höchsten Wert. Ein Klick auf einen Namen in der Legende blendet die Linie aus und wieder ein.
-- **Produktion der letzten 30 Tage** (umschaltbar auf einzelne Monate) und **der letzten 12 Monate** als Balken, mit Durchschnittslinie und hervorgehobenem besten Tag. Negative Werte (Zählersprung in der Statistik) erscheinen als kurzer roter Balken.
-- **Zeiträume**, **Akkus** (jeder Akku einzeln, darunter die Summen) sowie **Durchschnitt und Rekorde**
-- Tab **Strings**: Leistung je String im Vergleich (ebenfalls mit Tage blättern und Zoom), Ertrag je String (heute, gestern, gesamt), Produktion je String der letzten 30 Tage und Anteil jedes Strings am Gesamtertrag
-- Ein Klick auf einen Wert im Energiefluss, bei den Akkus oder Strings öffnet den Verlauf des Sensors. Bei mehreren Anlagen schaltest du oben rechts zwischen ihnen um.
-- Helles und dunkles Design folgen deinem Home-Assistant-Theme, auf dem Handy wird alles untereinander angezeigt.
+- **Energy flow now**: PV, house, battery and grid with animated lines (grid and house only with a grid meter or house consumption). The lines follow a real balance: PV charges the battery first, then supplies the house, and the rest goes to the grid. A discharging battery supplies the house and exports the surplus. Every node is clickable, for the battery power and state of charge separately. The battery node fills with the state of charge (red below 25 %, yellow up to 75 %, green above). The border of the house node is split into coloured arcs showing where the house consumption currently comes from (PV, battery, grid), with the percentages below.
+- **Key figures**: today (compared with the average of the last 30 days), yesterday, peak today, average power, runtime, house today
+- **Power today**: daily curve with the peak marked and a tooltip on hover. At first only PV is shown; click a name in the legend to show house, battery and grid (and to hide them again). Use ‹ Today › to browse past days, and drag with the mouse to zoom into a time range. After browsing or zooming only PV is shown again. The axis adapts to the highest value.
+- **Production, last 30 days** (switchable to single months) and **last 12 months** as bars, with an average line and the best day highlighted. Negative values (meter jump in the statistics) appear as a short red bar.
+- **Periods** (week, month, year, last month and the highlighted total) and **Batteries** (each battery individually, the sums below)
+- **Averages and records**: best day and power record shown large with their date, below them the averages over 7, 30 and 365 days and overall
+- **Strings** tab: power per string over the day, either as **Lines** or **Stacked** (the areas add up to the total PV power, and the tooltip shows the total), also with day browsing and zoom. Plus production per string (current power shown large, today, yesterday, total), production per string over the last 30 days and the share of each string in the total production.
+- Clicking a value in the energy flow, the batteries or the strings opens the history of that sensor. With several systems you switch between them at the top right.
+- Light and dark design follow your Home Assistant theme, and on a phone everything is stacked vertically.
 
-Die Diagramme nutzen den Verlauf und die Langzeitstatistik von Home Assistant. Die 30-Tage- und 12-Monats-Balken füllen sich deshalb erst nach und nach.
+The charts use the history and long-term statistics of Home Assistant, so the 30-day and 12-month bars fill up over time.
+
+After an update the browser sometimes still loads the dashboard from its cache. Press **Ctrl+F5** once to reload it.
