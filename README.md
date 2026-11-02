@@ -48,7 +48,7 @@ On the integration under **Settings → Devices & services → PV Summary** you 
 | Battery voltage, battery temperature | sensors in V/mV or °C/°F |
 
 - Each battery gets its own device with *Battery level*, *Battery power*, *Battery charged today*, *Battery discharged today* and, if configured, voltage and temperature.
-- The system device has the sums of all batteries: *Battery power*, *Battery charging/discharging power*, *Battery charged/discharged today and total* and the combined *Battery level*. The combined level is weighted by capacity if every battery has a capacity, otherwise it is the plain average.
+- The system device has the sums of all batteries: *Battery power*, *Battery charging/discharging power*, *Battery charged/discharged today and total* and the *Combined battery level*. The combined level is weighted by capacity if every battery has a capacity, otherwise it is the plain average.
 - You can add *Battery charged total* and *Battery discharged total* to the **Energy dashboard** under "Home battery storage".
 - A battery set up with v1.5 or earlier is taken over automatically as "Akku" when updating.
 
@@ -89,8 +89,8 @@ Via **Add string** you enter individual PV strings: power (required), voltage an
 The integration brings its own dashboard. After setup it appears automatically as **PV Summary** in the sidebar, without HACS cards, without YAML and without adjusting entity IDs. Texts are shown in German if Home Assistant is set to German, otherwise in English.
 
 - **Energy flow now**: PV, house, battery and grid with animated lines (grid and house only with a grid meter or house consumption). The lines follow a real balance: PV charges the battery first, then supplies the house, and the rest goes to the grid. A discharging battery supplies the house and exports the surplus. Every node is clickable, for the battery power and state of charge separately. The battery node fills with the state of charge (red below 25 %, yellow up to 75 %, green above). The border of the house node is split into coloured arcs showing where the house consumption currently comes from (PV, battery, grid), with the percentages below.
-- **Key figures**: today (compared with the average of the last 30 days), yesterday, peak today, average power, runtime, house today
-- **Power today**: daily curve smoothed to 5 minutes. The line shows the 5-minute average, and the faint band behind it spans the lowest to the highest value. The marked peak is the best 5-minute average, and the tooltip shows average, minimum and maximum. At first only PV is shown; click a name in the legend to show house, battery and grid (and to hide them again). Use ‹ Today › to browse past days. The axis adapts to the highest value.
+- **Key figures**: today (compared with the average of the last 30 days), yesterday, peak today, average power, runtime, house today. With a grid meter you also get **self-sufficiency today** (share of the house consumption that did not come from the grid) and **self-consumption today** (share of the PV production that was not exported). Clicking "house today" opens a window with the house consumption of the last 30 days next to the PV production per day; hover or tap a day to see house, PV and self-sufficiency.
+- **Power today**: daily curve smoothed to 5 minutes. The line shows the 5-minute average, and the faint band behind it spans the lowest to the highest value. The marked peak is the best 5-minute average, and the tooltip shows average, minimum and maximum. Sunrise and sunset at the location of your Home Assistant installation are drawn as dashed lines with their time, and the night is slightly darkened. At first only PV is shown; click a name in the legend to show house, battery and grid (and to hide them again). Use ‹ Today › to browse past days. The axis adapts to the highest value.
 - **Zooming** in the daily curves: **Ctrl + scroll wheel** (or the pinch gesture on a touchpad) zooms around the mouse pointer, and Shift + scroll wheel moves the visible range. Dragging with the mouse selects a time range. On a phone, zoom and move with two fingers. Double-click or double-tap shows the whole day again.
 - **Production, last 30 days** (switchable to single months) and **last 12 months** as bars, with an average line and the best day highlighted. Negative values (meter jump in the statistics) appear as a short red bar.
 - **Periods** (week, month, year, last month and the highlighted total) and **Batteries** (each battery individually, the sums below)
@@ -99,6 +99,6 @@ The integration brings its own dashboard. After setup it appears automatically a
 - Clicking a value in the energy flow, the batteries or the strings opens the history of that sensor. With several systems you switch between them at the top right.
 - Light and dark design follow your Home Assistant theme, and on a phone everything is stacked vertically.
 
-The charts use the history and long-term statistics of Home Assistant, so the 30-day and 12-month bars fill up over time.
+While data is loading, the charts show a loading hint. The charts use the history and long-term statistics of Home Assistant, so the 30-day and 12-month bars fill up over time.
 
 After an update the browser sometimes still loads the dashboard from its cache. Press **Ctrl+F5** once to reload it.

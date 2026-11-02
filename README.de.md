@@ -48,7 +48,7 @@ An der Integration unter **Einstellungen → Geräte & Dienste → PV Summary** 
 | Akkuspannung, Akkutemperatur | Sensoren in V/mV bzw. °C/°F |
 
 - Jeder Akku bekommt ein eigenes Gerät mit *Akkustand*, *Akkuleistung*, *Akku geladen heute*, *Akku entladen heute* und, falls angegeben, Spannung und Temperatur.
-- An der Anlage gibt es die Summen aller Akkus: *Akkuleistung*, *Akku Lade-/Entladeleistung*, *Akku geladen/entladen heute und gesamt* sowie den gemeinsamen *Akkustand*. Der gemeinsame Akkustand ist nach Kapazität gewichtet, wenn bei allen Akkus eine Kapazität eingetragen ist, sonst der einfache Durchschnitt.
+- An der Anlage gibt es die Summen aller Akkus: *Akkuleistung*, *Akku Lade-/Entladeleistung*, *Akku geladen/entladen heute und gesamt* sowie den *Kombinierten Akkustand*. Der kombinierte Akkustand ist nach Kapazität gewichtet, wenn bei allen Akkus eine Kapazität eingetragen ist, sonst der einfache Durchschnitt.
 - *Akku geladen gesamt* und *Akku entladen gesamt* kannst du im **Energie-Dashboard** unter „Batteriespeicher“ eintragen.
 - Ein bis v1.5 eingerichteter Akku wird beim Update automatisch als „Akku“ übernommen.
 
@@ -89,8 +89,8 @@ An der Integration unter **Einstellungen → Geräte & Dienste → PV Summary** 
 Die Integration bringt ihr eigenes Dashboard mit. Es erscheint nach dem Einrichten automatisch als **PV Summary** in der Seitenleiste, ohne HACS-Karten, ohne YAML und ohne Anpassen von Entity-IDs. Die Texte erscheinen auf Deutsch, wenn Home Assistant auf Deutsch eingestellt ist, sonst auf Englisch.
 
 - **Energiefluss jetzt**: PV, Haus, Akku und Netz mit animierten Linien (Netz und Haus nur mit Netz-Zähler oder Hausverbrauch). Die Linien folgen einer echten Bilanz: PV lädt zuerst den Akku, dann versorgt sie das Haus, der Rest geht ins Netz. Ein entladender Akku versorgt das Haus und speist den Überschuss ein. Jeder Knoten ist klickbar, beim Akku Leistung und Akkustand getrennt. Der Akku-Knoten füllt sich mit dem Akkustand (unter 25 % rot, bis 75 % gelb, darüber grün). Der Rand des Haus-Knotens ist in farbige Bögen geteilt und zeigt, woher der Hausverbrauch gerade kommt (PV, Akku, Netz), mit den Prozenten darunter.
-- **Kennzahlen**: Heute (mit Vergleich zum Ø der letzten 30 Tage), Gestern, Spitze heute, Ø Leistung, Laufzeit, Haus heute
-- **Leistung heute**: Tageskurve, geglättet auf 5 Minuten. Die Linie zeigt den Mittelwert je 5 Minuten, das blasse Band dahinter reicht vom kleinsten bis zum größten Wert. Die markierte Spitze ist das beste 5-Minuten-Mittel, der Tooltip zeigt Mittel, Minimum und Maximum. Anfangs ist nur PV zu sehen, Haus, Akku und Netz blendest du mit einem Klick auf den Namen in der Legende ein (und wieder aus). Mit ‹ Heute › blätterst du durch vergangene Tage. Die Achse richtet sich nach dem höchsten Wert.
+- **Kennzahlen**: Heute (mit Vergleich zum Ø der letzten 30 Tage), Gestern, Spitze heute, Ø Leistung, Laufzeit, Haus heute. Mit Netz-Zähler kommen **Autarkie heute** (Anteil des Hausverbrauchs, der nicht aus dem Netz kam) und **Eigenverbrauch heute** (Anteil der PV-Produktion, der nicht eingespeist wurde) dazu. Ein Klick auf „Haus heute“ öffnet ein Fenster mit dem Hausverbrauch der letzten 30 Tage, daneben die PV-Produktion je Tag; antippen oder überfahren zeigt Haus, PV und Autarkie des Tages.
+- **Leistung heute**: Tageskurve, geglättet auf 5 Minuten. Die Linie zeigt den Mittelwert je 5 Minuten, das blasse Band dahinter reicht vom kleinsten bis zum größten Wert. Die markierte Spitze ist das beste 5-Minuten-Mittel, der Tooltip zeigt Mittel, Minimum und Maximum. Sonnenaufgang und -untergang am Standort deiner Home-Assistant-Installation sind als gestrichelte Linien mit Uhrzeit eingezeichnet, die Nacht ist leicht abgedunkelt. Anfangs ist nur PV zu sehen, Haus, Akku und Netz blendest du mit einem Klick auf den Namen in der Legende ein (und wieder aus). Mit ‹ Heute › blätterst du durch vergangene Tage. Die Achse richtet sich nach dem höchsten Wert.
 - **Zoomen** in den Tageskurven: **Strg + Mausrad** (oder die Zoom-Geste am Touchpad) zoomt um die Stelle unter dem Mauszeiger, Shift + Mausrad verschiebt den Ausschnitt. Ziehen mit der Maus wählt einen Zeitraum. Am Handy zoomst und verschiebst du mit zwei Fingern. Doppelklick oder doppeltes Tippen zeigt wieder den ganzen Tag.
 - **Produktion der letzten 30 Tage** (umschaltbar auf einzelne Monate) und **der letzten 12 Monate** als Balken, mit Durchschnittslinie und hervorgehobenem besten Tag. Negative Werte (Zählersprung in der Statistik) erscheinen als kurzer roter Balken.
 - **Zeiträume** (Woche, Monat, Jahr, letzter Monat und hervorgehoben der Gesamtwert) und **Akkus** (jeder Akku einzeln, darunter die Summen)
@@ -99,6 +99,6 @@ Die Integration bringt ihr eigenes Dashboard mit. Es erscheint nach dem Einricht
 - Ein Klick auf einen Wert im Energiefluss, bei den Akkus oder Strings öffnet den Verlauf des Sensors. Bei mehreren Anlagen schaltest du oben rechts zwischen ihnen um.
 - Helles und dunkles Design folgen deinem Home-Assistant-Theme, auf dem Handy wird alles untereinander angezeigt.
 
-Die Diagramme nutzen den Verlauf und die Langzeitstatistik von Home Assistant. Die 30-Tage- und 12-Monats-Balken füllen sich deshalb erst nach und nach.
+Solange Daten geladen werden, zeigen die Diagramme einen Ladehinweis. Die Diagramme nutzen den Verlauf und die Langzeitstatistik von Home Assistant. Die 30-Tage- und 12-Monats-Balken füllen sich deshalb erst nach und nach.
 
 Nach einem Update lädt der Browser das Dashboard manchmal noch aus dem Cache. Dann hilft einmal **Strg+F5**.
