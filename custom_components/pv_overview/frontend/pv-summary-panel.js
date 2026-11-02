@@ -1261,7 +1261,7 @@ class PVSummaryPanel extends HTMLElement {
   _renderRecords() {
     const best = this._state("best_day");
     const rec = this._state("max_power_alltime");
-    const record = (key, icon, value, unit, label, when) => this._has(key) ? `<div class="recrow click" data-key="${key}">
+    const record = (key, icon, value, unit, label, when) => this._has(key) ? `<div class="recrow">
         <ha-icon icon="${icon}" style="color:${COLORS.pv};--mdc-icon-size:20px"></ha-icon>
         <span>${label}${when ? ` <span class="muted">${when}</span>` : ""}</span>
         <b>${value}<small>${unit}</small></b></div>` : "";
@@ -1271,7 +1271,7 @@ class PVSummaryPanel extends HTMLElement {
       if (!this._has(key)) return "";
       const v = this._num(key);
       const pct = bestV > 0 && v !== null ? Math.min(100, Math.max(0, (v / bestV) * 100)) : 0;
-      return `<div class="avgrow click" data-key="${key}"><span class="muted">${label}</span>
+      return `<div class="avgrow"><span class="muted">${label}</span>
         <div class="bar"><div style="width:${pct.toFixed(1)}%;background:${COLORS.pv}"></div></div>
         <b>${fmt(v, 1)}<small>kWh</small></b></div>`;
     };
