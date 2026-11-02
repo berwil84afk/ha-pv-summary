@@ -194,7 +194,7 @@ BATTERY_SENSORS: tuple[PVSensorDescription, ...] = (
 # Gemeinsamer Akkustand aller Akkus (nach Kapazität gewichtet)
 BATTERY_SOC_SENSOR = PVSensorDescription(
     key="battery_soc",
-    translation_key="battery_soc",
+    translation_key="battery_soc_combined",
     device_class=SensorDeviceClass.BATTERY,
     native_unit_of_measurement=PERCENTAGE,
     state_class=SensorStateClass.MEASUREMENT,
