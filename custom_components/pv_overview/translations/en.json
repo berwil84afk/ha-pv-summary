@@ -101,6 +101,9 @@
       "battery_soc": {
         "name": "Battery level"
       },
+      "battery_soc_combined": {
+        "name": "Combined battery level"
+      },
       "battery_voltage": {
         "name": "Battery voltage"
       },

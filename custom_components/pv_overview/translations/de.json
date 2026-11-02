@@ -101,6 +101,9 @@
       "battery_soc": {
         "name": "Akkustand"
       },
+      "battery_soc_combined": {
+        "name": "Kombinierter Akkustand"
+      },
       "battery_voltage": {
         "name": "Akkuspannung"
       },
