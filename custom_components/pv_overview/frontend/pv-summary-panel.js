@@ -6,6 +6,7 @@ const COLORS = { pv: "#f0a30a", bat: "#1d9e75", house: "#5b7290", grid: "#7f77dd
 const STRING_COLORS = ["#f0a30a", "#1d9e75", "#7f77dd", "#d85a30", "#378add", "#d4537e", "#639922", "#888780"];
 const HISTORY_REFRESH_MS = 5 * 60 * 1000;
 const LIVE_RENDER_MS = 2000;
+const SUN_COLOR = "#e6b800";
 const BIN_MS = 5 * 60 * 1000;       // Raster der geglätteten Tageskurven
 const ZOOM_MIN_MS = 30 * 60 * 1000; // kleinster Zoom-Ausschnitt
 
@@ -31,6 +32,7 @@ const STYLE = `
   .chips { display:flex; gap:6px; flex-wrap:wrap; margin-left:auto; }
   .kpis { display:grid; gap:12px; grid-template-columns:repeat(2, minmax(0,1fr)); grid-auto-rows:1fr; }
   .kpi { display:flex; align-items:center; gap:12px; padding:12px 14px; }
+  .kpi.click:hover { border-color:${COLORS.house}; }
   .kpi .ico { flex:none; width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center; --mdc-icon-size:20px; }
   .kpi .txt { min-width:0; }
   .flowcard svg { max-height:250px; margin:0 auto; }
@@ -73,8 +75,11 @@ const STYLE = `
   .battery .info { display:grid; gap:4px; font-size:14px; }
   .muted { color:var(--secondary-text-color); }
   .empty { padding:40px 16px; text-align:center; color:var(--secondary-text-color); }
+  .loading { display:inline-block; width:14px; height:14px; margin-right:8px; vertical-align:-2px; border:2px solid var(--divider-color, rgba(0,0,0,.15)); border-top-color:${COLORS.pv}; border-radius:50%; animation:spin .8s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
   .click { cursor:pointer; }
   .card h3 { flex-wrap:wrap; }
+  .list .total { margin-top:8px; }
   .list .total span { font-size:15px; }
   .list .total b { font-size:20px; }
   .strtile .val.big { font-size:32px; line-height:1.1; }
@@ -87,6 +92,8 @@ const STYLE = `
   .avgrow { display:grid; grid-template-columns:minmax(76px,auto) 1fr 78px; align-items:center; gap:10px; font-size:13px; }
   .avgrow .bar { margin-top:0; }
   .avgrow b { text-align:right; font-weight:500; white-space:nowrap; }
+  .avg5 { font-size:12px; font-weight:400; color:var(--secondary-text-color); }
+  svg text.sunt { fill:${SUN_COLOR}; font-size:11px; }
   .curve-wrap .zhint { position:absolute; left:50%; top:40%; transform:translate(-50%,-50%); pointer-events:none; background:rgba(0,0,0,.7); color:#fff; font-size:13px; padding:6px 12px; border-radius:8px; opacity:0; transition:opacity .2s; }
   .curve-wrap .zhint.show { opacity:1; }
   .lg { background:none; border:0; color:inherit; font:inherit; cursor:pointer; display:inline-flex; align-items:center; gap:4px; margin-left:10px; padding:0; }
@@ -116,6 +123,16 @@ const STYLE = `
   .legend span { display:flex; align-items:center; gap:6px; }
   .legend b { margin-left:auto; font-weight:500; }
   .legend i { font-style:normal; color:var(--secondary-text-color); min-width:58px; text-align:right; }
+  .ovl-back { position:fixed; inset:0; z-index:10; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; padding:16px; }
+  .ovl { width:min(760px, 100%); max-height:calc(100vh - 32px); overflow:auto; box-shadow:0 8px 32px rgba(0,0,0,.4); }
+  .ovl h3 .hint { display:inline-flex; gap:12px; }
+  .ovl h3 .hint > span { display:inline-flex; align-items:center; gap:4px; }
+  .ovl h3 .dot, .ovl-info .dot { width:9px; height:9px; border-radius:2px; margin-right:4px; }
+  .ovl-info { display:flex; flex-wrap:wrap; gap:6px 16px; align-items:center; min-height:22px; font-size:13px; margin-bottom:6px; }
+  .ovl-info b { font-weight:500; }
+  .ovl-foot { display:flex; justify-content:flex-end; margin-top:8px; }
+  .oday .ohit { fill:transparent; }
+  .oday.on .ohit { fill:var(--secondary-text-color); fill-opacity:.12; }
   @media (max-width: 700px) { .row.wide-left, .row.half { grid-template-columns:1fr; } .content { padding:8px; gap:8px; } .row { gap:8px; } }
 `;
 
@@ -140,6 +157,9 @@ class PVSummaryPanel extends HTMLElement {
     this._prodMonth = null;  // erster Tag des gewählten Monats
     this._monthDays = [];
     this._hidden = {};       // Diagramm -> Set der ausgeblendeten Reihen (nur bis zum nächsten Tag/Zoom)
+    this._loading = {};      // laufende Abfragen: curve, days, month
+    this._historyDay = null; // Tag, zu dem this._history gehört
+    this._ovl = null;        // offenes Overlay
     this._stringMode = "lines"; // "lines" oder "stack" (gestapelte Flächen)
   }
 
@@ -190,9 +210,15 @@ class PVSummaryPanel extends HTMLElement {
       if (Math.abs(w - (this._width || 0)) > 40) { this._width = w; this._render(); }
     });
     this._resize.observe(this._content);
+    this._ovlEl = document.createElement("div");
+    this.shadowRoot.appendChild(this._ovlEl);
+    this._ovlEl.addEventListener("click", (ev) => this._onOverlayClick(ev));
+    this._ovlEl.addEventListener("pointermove", (ev) => this._onOverlayHover(ev));
+    this._onKey = (ev) => { if (ev.key === "Escape" && this._ovl) this._closeOverlay(); };
     this.shadowRoot.querySelector(".tabs").addEventListener("click", (ev) => {
       const idx = ev.target.closest(".tab")?.dataset.idx;
       if (idx === undefined) return;
+      this._closeOverlay();
       this._selected = Number(idx);
       this._view = "overview";
       this._day = null;
@@ -213,8 +239,8 @@ class PVSummaryPanel extends HTMLElement {
       return;
     }
     this._renderTabs();
+    this._fetchHistory(); // setzt die Ladehinweise, bevor zum ersten Mal gezeichnet wird
     this._render();
-    this._fetchHistory();
     this._startTimer();
   }
 
@@ -288,6 +314,11 @@ class PVSummaryPanel extends HTMLElement {
       this._onNav(nav.dataset.nav);
       return;
     }
+    const ovl = ev.target.closest("[data-open-ovl]");
+    if (ovl) {
+      this._openOverlay(ovl.dataset.openOvl);
+      return;
+    }
     const el = ev.target.closest("[data-key]");
     if (!el) return;
     const entityId = this._id(el.dataset.key);
@@ -339,6 +370,16 @@ class PVSummaryPanel extends HTMLElement {
 
   get _isToday() { return this._day === null; }
 
+  // Sonnenauf- und -untergang [ms, ms] am Standort von Home Assistant (null ohne Standort oder bei Polartag/-nacht)
+  _sunTimes(dayStart) {
+    const lat = this._hass?.config?.latitude, lon = this._hass?.config?.longitude;
+    if (typeof lat !== "number" || typeof lon !== "number") return null;
+    this._sunCache ||= {};
+    const k = `${dayStart}|${lat}|${lon}`;
+    if (!(k in this._sunCache)) this._sunCache[k] = sunTimes(dayStart + 12 * 3600 * 1000, lat, lon);
+    return this._sunCache[k];
+  }
+
   // ------------------------------------------------------------------ Daten
 
   async _fetchHistory() {
@@ -361,7 +402,8 @@ class PVSummaryPanel extends HTMLElement {
         types: ["change"],
         units: { energy: "kWh" },
       }).then((res) => (res[total] || []).map((p) => ({ start: new Date(p.start), v: p.change ?? 0 })));
-      jobs.push(stats(dayStart, "day").then((d) => { this._days = d; }).catch(() => { this._days = []; }));
+      this._loading.days = true;
+      jobs.push(stats(dayStart, "day").then((d) => { this._days = d; }).catch(() => { this._days = []; }).finally(() => { this._loading.days = false; }));
       jobs.push(stats(monthStart, "month").then((m) => { this._months = m; }).catch(() => { this._months = []; }));
     }
     if (stringTotals.length) {
@@ -391,6 +433,13 @@ class PVSummaryPanel extends HTMLElement {
       ...(entry.strings || []).map((s) => `${s.id}|string_power`),
     ].map((k) => this._id(k)).filter(Boolean);
     if (!ids.length) return;
+    // Anderer Tag: alte Kurve nicht unter dem neuen Datum zeigen, sondern einen Ladehinweis
+    if (this._historyDay !== start) {
+      this._history = {};
+      this._historyDay = start;
+    }
+    this._loading.curve = true;
+    if (render) this._render();
     try {
       const res = await this._hass.callWS({
         type: "history/history_during_period",
@@ -405,6 +454,7 @@ class PVSummaryPanel extends HTMLElement {
     } catch (err) {
       this._history = {};
     }
+    if (start === this._dayStart) this._loading.curve = false;
     if (render && entry === this._entry) this._render();
   }
 
@@ -413,6 +463,9 @@ class PVSummaryPanel extends HTMLElement {
     const total = this._id("total");
     const m = this._prodMonth;
     if (!total || !m) return;
+    if (this._monthDaysFor !== m) { this._monthDays = []; this._monthDaysFor = m; }
+    this._loading.month = true;
+    if (render) this._render();
     try {
       const res = await this._hass.callWS({
         type: "recorder/statistics_during_period",
@@ -427,10 +480,131 @@ class PVSummaryPanel extends HTMLElement {
     } catch (err) {
       this._monthDays = [];
     }
+    if (m === this._prodMonth) this._loading.month = false;
     if (render) this._render();
   }
 
   // ------------------------------------------------------------------ Rendering
+
+  // ------------------------------------------------------------------ Overlay „Haus heute“
+
+  async _openOverlay(kind) {
+    if (kind !== "house") return;
+    const entry = this._entry;
+    this._ovl = { kind, loading: true, days: [], sel: null };
+    window.addEventListener("keydown", this._onKey);
+    this._renderOverlay();
+    const start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - 29);
+    const keys = { house: "house_total", pv: "total", imp: "grid_import_total" };
+    const ids = Object.fromEntries(Object.entries(keys).map(([k, key]) => [k, this._id(key)]).filter(([, id]) => id));
+    let byDay = {};
+    try {
+      const res = await this._hass.callWS({
+        type: "recorder/statistics_during_period",
+        start_time: start.toISOString(),
+        statistic_ids: Object.values(ids),
+        period: "day",
+        types: ["change"],
+        units: { energy: "kWh" },
+      });
+      for (const [k, id] of Object.entries(ids)) {
+        for (const p of res[id] || []) {
+          const d = new Date(p.start);
+          (byDay[d.toDateString()] ||= { start: d })[k] = p.change ?? 0;
+        }
+      }
+    } catch (err) {
+      byDay = {};
+    }
+    if (!this._ovl || this._entry !== entry) return;
+    this._ovl.days = Object.values(byDay).filter((d) => d.house !== undefined).sort((a, b) => a.start - b.start).slice(-30);
+    this._ovl.loading = false;
+    this._renderOverlay();
+  }
+
+  _closeOverlay() {
+    this._ovl = null;
+    window.removeEventListener("keydown", this._onKey);
+    if (this._ovlEl) this._ovlEl.innerHTML = "";
+  }
+
+  _onOverlayClick(ev) {
+    if (ev.target.classList.contains("ovl-back") || ev.target.closest("[data-ovl=close]")) { this._closeOverlay(); return; }
+    if (ev.target.closest("[data-ovl=history]")) {
+      const entityId = this._id("house_today");
+      this._closeOverlay();
+      if (entityId) this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId }, bubbles: true, composed: true }));
+      return;
+    }
+    this._onOverlayHover(ev);
+  }
+
+  // Tag unter dem Zeiger (bzw. angetippt) in der Infozeile zeigen
+  _onOverlayHover(ev) {
+    const g = ev.target.closest?.("[data-day]");
+    if (!this._ovl || !g) return;
+    const i = Number(g.dataset.day);
+    if (this._ovl.sel === i) return;
+    this._ovl.sel = i;
+    const info = this._ovlEl.querySelector(".ovl-info");
+    if (info) info.innerHTML = this._overlayInfo();
+    for (const el of this._ovlEl.querySelectorAll("[data-day]")) el.classList.toggle("on", Number(el.dataset.day) === i);
+  }
+
+  _overlayInfo() {
+    const o = this._ovl, days = o.days;
+    if (!days.length) return "";
+    const done = days.filter((d) => d.start.toDateString() !== new Date().toDateString());
+    const avg = done.length ? done.reduce((a, d) => a + d.house, 0) / done.length : null;
+    const d = o.sel !== null ? days[o.sel] : null;
+    if (!d) return `<span class="muted">${TT("Tag antippen oder überfahren für Details", "Hover or tap a day for details")}${avg !== null ? ` · ${TT("Ø Haus", "Avg house")} <b>${fmt(avg, 1)} kWh</b>` : ""}</span>`;
+    const aut = d.imp !== undefined && d.house > 0 ? Math.min(100, Math.max(0, (1 - d.imp / d.house) * 100)) : null;
+    const date = d.start.toLocaleDateString(LOCALE(), { weekday: "short", day: "2-digit", month: "2-digit" });
+    const item = (color, label, v) => `<span><span class="dot" style="background:${color}"></span>${label} <b>${v}</b></span>`;
+    return `<b>${date}</b>${item(COLORS.house, TT("Haus", "House"), `${fmt(d.house, 1)} kWh`)}${d.pv !== undefined ? item(COLORS.pv, "PV", `${fmt(d.pv, 1)} kWh`) : ""}${aut !== null ? item(COLORS.bat, TT("Autarkie", "Self-sufficiency"), `${fmt(aut, 0)} %`) : ""}`;
+  }
+
+  _renderOverlay() {
+    const o = this._ovl;
+    if (!o || !this._ovlEl) return;
+    const title = TT("Hausverbrauch, letzte 30 Tage", "House consumption, last 30 days");
+    const legend = `<span class="hint"><span><span class="dot" style="background:${COLORS.house}"></span>${TT("Haus", "House")}</span><span><span class="dot" style="background:${COLORS.pv}"></span>PV</span></span>`;
+    let body;
+    if (o.loading) body = `<div class="empty">${LOADING()}</div>`;
+    else if (!o.days.length) body = `<div class="empty">${TT("Noch keine Tageswerte für den Hausverbrauch.", "No daily values for the house consumption yet.")}</div>`;
+    else body = `<div class="ovl-info">${this._overlayInfo()}</div>${this._overlayChart()}`;
+    this._ovlEl.innerHTML = `<div class="ovl-back"><div class="ovl card" role="dialog" aria-modal="true" aria-label="${title}">
+      <h3><ha-icon icon="mdi:home-lightning-bolt-outline"></ha-icon>${title}${legend}<button class="navbtn" data-ovl="close" title="${TT("Schließen", "Close")}">✕</button></h3>
+      ${body}
+      <div class="ovl-foot"><button class="navbtn" data-ovl="history">${TT("Verlauf öffnen", "Open history")}</button></div>
+    </div></div>`;
+  }
+
+  _overlayChart() {
+    const days = this._ovl.days;
+    const W = Math.max(300, Math.min(760, window.innerWidth - 32) - 34), H = 230, L = 36, R = 6, T = 14, B = 22;
+    const todayKey = new Date().toDateString();
+    const done = days.filter((d) => d.start.toDateString() !== todayKey);
+    const avg = done.length ? done.reduce((a, d) => a + d.house, 0) / done.length : null;
+    const maxV = niceMax(Math.max(1, ...days.map((d) => Math.max(d.house, d.pv ?? 0))));
+    const y = (v) => T + (1 - v / maxV) * (H - T - B);
+    const bw = (W - L - R) / 30, offset = 30 - days.length;
+    let svg = "";
+    for (const v of ticks(0, maxV)) svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--divider-color, rgba(0,0,0,.1))"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v, 0)}</text>`;
+    const every = W < 450 ? 10 : 5;
+    days.forEach((d, i) => {
+      const xi = L + (offset + i) * bw;
+      const isToday = d.start.toDateString() === todayKey;
+      const hw = Math.max(2, (bw - 3) * 0.62), pw = Math.max(1.5, (bw - 3) * 0.32);
+      svg += `<g data-day="${i}" class="oday${this._ovl.sel === i ? " on" : ""}"><rect x="${xi.toFixed(1)}" y="${T}" width="${bw.toFixed(1)}" height="${H - T - B}" class="ohit"/>`
+        + barRect(xi + 1.5, hw, d.house, maxV, H - B, H - T - B, COLORS.house, "", 2).replace(/<title><\/title>/, "").replace("<rect ", `<rect fill-opacity="${isToday ? 0.7 : 1}" `)
+        + (d.pv !== undefined ? barRect(xi + 1.5 + hw, pw, d.pv, maxV, H - B, H - T - B, COLORS.pv, "", 1.5).replace(/<title><\/title>/, "") : "")
+        + "</g>";
+      if (i % every === (days.length - 1) % every) svg += `<text x="${(xi + bw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle">${fmtDayMonth(d.start)}</text>`;
+    });
+    if (avg !== null) svg += `<line x1="${L}" x2="${W - R}" y1="${y(avg)}" y2="${y(avg)}" stroke="${COLORS.house}" stroke-dasharray="5 4" stroke-width="1.5" pointer-events="none"/>`;
+    return `<svg viewBox="0 0 ${W} ${H}">${svg}</svg>${avg !== null ? `<div class="muted" style="font-size:12px">${TT("gestrichelt = Ø Haus", "dashed = avg house")} ${fmt(avg, 1)} kWh · ${TT("heute heller (noch nicht abgeschlossen)", "today lighter (not finished yet)")}</div>` : ""}`;
+  }
 
   _renderTabs() {
     const tabs = this.shadowRoot.querySelector(".tabs");
@@ -595,14 +769,14 @@ class PVSummaryPanel extends HTMLElement {
       const pct = ((today - avg30) / avg30) * 100;
       delta = `<div class="sub ${pct >= 0 ? "up" : "down"}">${pct >= 0 ? "+" : "−"}${fmt(Math.abs(pct), 0)} % ${TT("ggü. Ø 30 Tage", "vs. 30-day avg")}</div>`;
     }
-    const kpi = (key, icon, color, label, value, unit, sub) => `<div class="card kpi">
+    const kpi = (key, icon, color, label, value, unit, sub, attrs = "") => `<div class="card kpi${attrs ? " click" : ""}" ${attrs}>
         <div class="ico" style="background:${color}22;color:${color}"><ha-icon icon="${icon}"></ha-icon></div>
         <div class="txt"><div class="lbl">${label}</div><div class="val">${value}<small>${unit}</small></div>${sub || ""}</div>
       </div>`;
     const sub = (text) => `<div class="sub">${text || "&nbsp;"}</div>`;
     const hours = this._num("production_time_today");
     const sixth = this._has("house_today")
-      ? kpi("house_today", "mdi:home-lightning-bolt-outline", COLORS.house, TT("Haus heute", "House today"), fmt(this._num("house_today"), 2), "kWh", sub(TT("Verbrauch", "Consumption")))
+      ? kpi("house_today", "mdi:home-lightning-bolt-outline", COLORS.house, TT("Haus heute", "House today"), fmt(this._num("house_today"), 2), "kWh", sub(TT("Verbrauch · 30 Tage ›", "Consumption · 30 days ›")), `data-open-ovl="house" title="${TT("Hausverbrauch der letzten 30 Tage", "House consumption, last 30 days")}"`)
       : kpi("week", "mdi:calendar-week", "#639922", TT("Diese Woche", "This week"), fmt(this._num("week"), 1), "kWh", sub(""));
     return `<div class="kpis">
       ${kpi("today", "mdi:solar-power", COLORS.pv, TT("Heute", "Today"), fmt(today, 2), "kWh", delta || sub(""))}
@@ -611,7 +785,21 @@ class PVSummaryPanel extends HTMLElement {
       ${kpi("avg_power_today", "mdi:chart-bell-curve-cumulative", "#c9a000", TT("Ø Leistung", "Avg power"), fmtWValue(this._num("avg_power_today")), fmtWUnit(this._num("avg_power_today")), sub(TT("während der Produktion", "while producing")))}
       ${kpi("production_time_today", "mdi:timer-sand", "#5b7290", TT("Laufzeit heute", "Runtime today"), hours !== null ? fmtHours(hours).replace(" h", "") : "–", "h", sub(`${TT("über", "above")} ${fmt(this._entry.threshold ?? 10, 0)} W`))}
       ${sixth}
+      ${this._renderShareKpis(kpi, sub)}
     </div>`;
+  }
+
+  // Autarkie und Eigenverbrauch heute (nur mit Netz-Zähler, der Bezug und Einspeisung als Energie liefert)
+  _renderShareKpis(kpi, sub) {
+    if (!this._has("grid_import_today") || !this._has("grid_export_today") || !this._has("house_today")) return "";
+    const house = this._num("house_today"), imp = this._num("grid_import_today");
+    const pv = this._num("today"), exp = this._num("grid_export_today");
+    const pct = (part, whole) => (whole > 0 && part !== null ? Math.min(100, Math.max(0, (1 - part / whole) * 100)) : null);
+    const aut = pct(imp, house), own = pct(exp, pv);
+    return kpi("grid_import_today", "mdi:shield-home-outline", COLORS.bat, TT("Autarkie heute", "Self-sufficiency today"), aut === null ? "–" : fmt(aut, 0), "%",
+        sub(`${fmt(imp, 2)} kWh ${TT("aus dem Netz", "from the grid")}`))
+      + kpi("grid_export_today", "mdi:solar-power-variant-outline", COLORS.pv, TT("Eigenverbrauch heute", "Self-consumption today"), own === null ? "–" : fmt(own, 0), "%",
+        sub(`${fmt(exp, 2)} kWh ${TT("eingespeist", "exported")}`));
   }
 
   // Tageskurve mit Tooltip; defs: [{ key, color, label, fill?, peak?, signed? }]
@@ -671,6 +859,25 @@ class PVSummaryPanel extends HTMLElement {
       grid += `<text x="${x(tt)}" y="${H - 6}" text-anchor="middle">${label}</text>`;
     }
     if (today && now >= t0 && now <= t1) grid += `<line x1="${x(now)}" x2="${x(now)}" y1="${T}" y2="${H - B}" stroke="var(--secondary-text-color)" stroke-dasharray="2 4" stroke-width="1"/>`;
+    // Nacht abgedunkelt, Sonnenauf- und -untergang als Linie mit Uhrzeit
+    const sun = this._sunTimes(dayStart);
+    let night = "";
+    if (sun) {
+      const shade = (a, b) => {
+        const xa = x(Math.max(a, t0)), xb = x(Math.min(b, t1));
+        return xb > xa ? `<rect x="${xa.toFixed(1)}" y="${T}" width="${(xb - xa).toFixed(1)}" height="${H - T - B}" fill="#000" fill-opacity="${this._hass?.themes?.darkMode ? 0.28 : 0.05}"/>` : "";
+      };
+      night = shade(t0, sun[0]) + shade(sun[1], t1);
+      sun.forEach((ts, i) => {
+        if (ts < t0 || ts > t1) return;
+        const xs = x(ts), right = xs < W - R - 70;
+        const time = new Date(ts).toLocaleTimeString(LOCALE(), { hour: "2-digit", minute: "2-digit" });
+        grid += `<line x1="${xs.toFixed(1)}" x2="${xs.toFixed(1)}" y1="${T}" y2="${H - B}" stroke="${SUN_COLOR}" stroke-dasharray="4 4" stroke-width="1"/>`
+          + `<g transform="translate(${(right ? xs + 12 : xs - 12).toFixed(1)},${T + 12})">${sunIcon(i === 0)}</g>`
+          + `<text x="${(right ? xs + 22 : xs - 22).toFixed(1)}" y="${T + 16}" text-anchor="${right ? "start" : "end"}" class="sunt">${time}</text>`;
+      });
+    }
+    grid = night + grid;
 
     let paths = "";
     const xy = (p) => `${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`;
@@ -713,7 +920,8 @@ class PVSummaryPanel extends HTMLElement {
     // Legende: Klick blendet die Linie aus bzw. wieder ein
     const legend = withData.map((s) => `<button class="lg ${hidden.has(s.key) ? "off" : ""}" data-chart="${chartId}" data-series="${escapeHtml(s.key)}" title="${hidden.has(s.key) ? TT("Einblenden", "Show") : TT("Ausblenden", "Hide")}"><span style="width:10px;height:10px;border-radius:2px;background:${s.color}"></span>${escapeHtml(s.label)}</button>`).join("");
     const dateText = new Date(dayStart).toLocaleDateString(LOCALE(), { day: "2-digit", month: "2-digit", year: "numeric" });
-    const heading = today ? `${title} ${TT("heute", "today")}` : `${title} ${TT("am", "on")} ${dateText}`;
+    const heading = (today ? `${title} ${TT("heute", "today")}` : `${title} ${TT("am", "on")} ${dateText}`)
+      + `<span class="avg5" title="${TT("Jeder Punkt ist der Durchschnitt über 5 Minuten", "Each point is the average over 5 minutes")}">${TT("Ø je 5 Minuten", "5-min average")}</span>`;
     const modes = opts.modes ? `<span class="navbtns">
         <button class="navbtn ${stacked ? "" : "active"}" data-nav="smode-lines">${TT("Linien", "Lines")}</button>
         <button class="navbtn ${stacked ? "active" : ""}" data-nav="smode-stack">${TT("Gestapelt", "Stacked")}</button></span>` : "";
@@ -722,7 +930,7 @@ class PVSummaryPanel extends HTMLElement {
         <button class="navbtn" data-nav="day-prev" title="${TT("Vortag", "Previous day")}">‹</button>
         <button class="navbtn ${today ? "active" : ""}" data-nav="day-today">${TT("Heute", "Today")}</button>
         <button class="navbtn" data-nav="day-next" title="${TT("Nächster Tag", "Next day")}" ${today ? "disabled" : ""}>›</button></span>`;
-    const empty = today ? TT("Noch keine Verlaufsdaten für heute.", "No history for today yet.") : TT("Keine Daten vorhanden.", "No data available.");
+    const empty = this._loading.curve ? LOADING() : today ? TT("Noch keine Verlaufsdaten für heute.", "No history for today yet.") : TT("Keine Daten vorhanden.", "No data available.");
     const body = !series.length && withData.length ? `<div class="empty">${TT("Alle Linien ausgeblendet.", "All lines hidden.")}</div>` : series.length ? `<div class="curve-wrap" data-chart="${chartId}"><svg viewBox="0 0 ${W} ${H}">${grid}${paths}${sel}${hover}</svg><div class="tip" style="display:none"></div></div>` : `<div class="empty">${empty}</div>`;
     return `<div class="card"><h3><ha-icon icon="${icon}"></ha-icon>${heading}<span class="hint">${legend}</span>${modes}${nav}</h3>${body}</div>`;
   }
@@ -927,6 +1135,7 @@ class PVSummaryPanel extends HTMLElement {
         ${month ? `<button class="navbtn" data-nav="month-prev" title="${TT("Vormonat", "Previous month")}">‹</button><button class="navbtn" data-nav="month-next" title="${TT("Nächster Monat", "Next month")}" ${isCurMonth ? "disabled" : ""}>›</button>` : ""}</span>`;
     const head = (hint) => `<h3><ha-icon icon="mdi:chart-bar"></ha-icon>${title}<span class="hint">${hint}</span>${toggle}</h3>`;
     const present = days.filter(Boolean);
+    if (!present.length && (month ? this._loading.month : this._loading.days)) return `<div class="card">${head("")}<div class="empty">${LOADING()}</div></div>`;
     if (!present.length) return `<div class="card">${head("")}<div class="empty">${month ? TT("Keine Daten vorhanden.", "No data available.") : TT("Statistiken werden gesammelt. Nach dem ersten vollen Tag erscheinen hier Balken.", "Statistics are being collected. Bars appear after the first full day.")}</div></div>`;
     const maxV = niceMax(Math.max(1, ...present.map((d) => d.v), avg || 0));
     const bw = (W - L - R) / slots;
@@ -996,9 +1205,9 @@ class PVSummaryPanel extends HTMLElement {
       return `<div class="batblock">${ring}<div class="info"><b>${escapeHtml(b.title)}</b>${lines}${capacity}</div></div>`;
     };
     const mini = (key, label) => this._has(key) ? `<div class="card tile"><div class="lbl">${label}</div><div class="val">${fmt(this._num(key), 2)}<small>kWh</small></div></div>` : "";
-    const totals = `${mini("battery_charged_today", batteries.length > 1 ? TT("Geladen heute (alle)", "Charged today (all)") : TT("Geladen heute", "Charged today"))}${mini("battery_discharged_today", batteries.length > 1 ? TT("Entladen heute (alle)", "Discharged today (all)") : TT("Entladen heute", "Discharged today"))}${mini("house_today", TT("Haus heute", "House today"))}`;
+    const totals = `${mini("battery_charged_today", batteries.length > 1 ? TT("Geladen heute (alle)", "Charged today (all)") : TT("Geladen heute", "Charged today"))}${mini("battery_discharged_today", batteries.length > 1 ? TT("Entladen heute (alle)", "Discharged today (all)") : TT("Entladen heute", "Discharged today"))}`;
     const soc = this._num("battery_soc");
-    const hint = batteries.length > 1 && soc !== null ? `<span class="hint">${TT("gemeinsam", "combined")} ${fmt(soc, 0)} %</span>` : "";
+    const hint = batteries.length > 1 && soc !== null ? `<span class="hint">${TT("Gemeinsam", "Combined")} ${fmt(soc, 0)} %</span>` : "";
     return `<div class="card"><h3><ha-icon icon="mdi:home-battery"></ha-icon>${batteries.length > 1 ? TT("Akkus", "Batteries") : TT("Akku", "Battery")}${hint}</h3>
       <div class="batgrid">${batteries.map(block).join("")}</div>
       ${totals ? `<div class="mini" style="margin-top:12px">${totals}</div>` : ""}</div>`;
@@ -1036,7 +1245,7 @@ class PVSummaryPanel extends HTMLElement {
 
   _renderMonths() {
     const months = this._months.slice(-12);
-    if (!months.length) return `<div class="card"><h3><ha-icon icon="mdi:calendar-month"></ha-icon>${TT("Produktion der letzten 12 Monate", "Production, last 12 months")}</h3><div class="empty">${TT("Noch keine Monatsdaten.", "No monthly data yet.")}</div></div>`;
+    if (!months.length) return `<div class="card"><h3><ha-icon icon="mdi:calendar-month"></ha-icon>${TT("Produktion der letzten 12 Monate", "Production, last 12 months")}</h3><div class="empty">${this._loading.days ? LOADING() : TT("Noch keine Monatsdaten.", "No monthly data yet.")}</div></div>`;
     const W = this._chartWidth(0.5), H = 190, L = 40, R = 6, T = 18, B = 22;
     const maxV = niceMax(Math.max(1, ...months.map((m) => m.v)));
     const bw = (W - L - R) / 12;
@@ -1156,6 +1365,7 @@ let currentLocale = "de";
 // Texte: Deutsch, wenn Home Assistant auf Deutsch steht, sonst Englisch
 const TT = (de, en) => (currentLocale.toLowerCase().startsWith("de") ? de : en);
 const LOCALE = () => currentLocale;
+const LOADING = () => `<span class="loading"></span>${TT("Lade Daten …", "Loading data …")}`;
 
 function fmt(v, digits = 1) {
   if (v === null || v === undefined || !Number.isFinite(v)) return "–";
@@ -1195,8 +1405,8 @@ function sourceArcs(n) {
     offset += len;
     return arc;
   }).join("");
-  const shares = n.arcs.filter((p) => p.v / sum >= 0.005).map((p) => `${p.label} ${fmt((p.v / sum) * 100, 0)}`).join(" · ");
-  return `${arcs}<text x="${n.x}" y="${n.y + 56}" text-anchor="middle" style="font-size:11px">${shares} %</text>`;
+  const shares = n.arcs.filter((p) => p.v / sum >= 0.005).map((p) => `${p.label} ${fmt((p.v / sum) * 100, 0)} %`).join(" · ");
+  return `${arcs}<text x="${n.x}" y="${n.y + 56}" text-anchor="middle" style="font-size:11px">${shares}</text>`;
 }
 
 // Farbe des Akkustands: unter 25 % rot, bis 75 % gelb, darüber grün
@@ -1244,6 +1454,31 @@ function binAt(bins, t) {
     if (t < bins[m][0]) hi = m - 1; else if (t >= bins[m][0] + BIN_MS) lo = m + 1; else return bins[m];
   }
   return null;
+}
+
+// Sonnenauf- und -untergang nach der Näherung der Sonnenaufgangsgleichung (Genauigkeit etwa 1 Minute)
+function sunTimes(ms, lat, lon) {
+  const rad = Math.PI / 180, day = 864e5, J1970 = 2440588, J2000 = 2451545, J0 = 0.0009;
+  const d = ms / day - 0.5 + J1970 - J2000;
+  const lw = rad * -lon, phi = rad * lat;
+  const n = Math.round(d - J0 - lw / (2 * Math.PI));
+  const ds = J0 + lw / (2 * Math.PI) + n;
+  const M = rad * (357.5291 + 0.98560028 * ds);
+  const L = M + rad * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M)) + rad * 102.9372 + Math.PI;
+  const dec = Math.asin(Math.sin(rad * 23.4397) * Math.sin(L));
+  const cosW = (Math.sin(rad * -0.833) - Math.sin(phi) * Math.sin(dec)) / (Math.cos(phi) * Math.cos(dec));
+  if (cosW < -1 || cosW > 1) return null;
+  const w = Math.acos(cosW);
+  const transit = (a) => J2000 + J0 + (a + lw) / (2 * Math.PI) + n + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
+  const toMs = (j) => (j + 0.5 - J1970) * day;
+  const noon = transit(0), set = transit(w);
+  return [toMs(noon - (set - noon)), toMs(set)];
+}
+
+// Kleine Sonne am Horizont mit Pfeil nach oben (Aufgang) bzw. unten (Untergang)
+function sunIcon(up) {
+  return `<g stroke="${SUN_COLOR}" stroke-width="1.3" fill="none" stroke-linecap="round"><path d="M-6 3 A6 6 0 0 1 6 3"/><line x1="-8" y1="3" x2="8" y2="3"/>`
+    + `<line x1="0" y1="-4" x2="0" y2="-9"/><path d="${up ? "M-2.5 -6.5 L0 -9 L2.5 -6.5" : "M-2.5 -6.5 L0 -4 L2.5 -6.5"}"/></g>`;
 }
 
 function valueAt(pts, t) {
