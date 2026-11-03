@@ -166,6 +166,7 @@ class PVSummaryPanel extends HTMLElement {
     this._historyDay = null; // Tag, zu dem this._history gehört
     this._ovl = null;        // offenes Overlay
     this._stringMode = "lines"; // "lines" oder "stack" (gestapelte Flächen)
+    this._dayMode = loadPref("pv-summary-daymode", "day"); // "day" = Produktionszeitraum, "full" = ganzer Tag
   }
 
   // Ausgeblendete Reihen; „Leistung heute“ zeigt anfangs nur PV
@@ -346,6 +347,12 @@ class PVSummaryPanel extends HTMLElement {
       this._zoom = null;
       this._hidden = {};
       this._fetchCurveHistory();
+    } else if (action === "dmode-day" || action === "dmode-full") {
+      this._dayMode = action === "dmode-full" ? "full" : "day";
+      savePref("pv-summary-daymode", this._dayMode);
+      this._zoom = null;
+      this._hover = null;
+      this._render();
     } else if (action === "smode-lines" || action === "smode-stack") {
       this._stringMode = action === "smode-stack" ? "stack" : "lines";
       this._hover = null;
@@ -712,11 +719,29 @@ class PVSummaryPanel extends HTMLElement {
     this._showHover(chartId);
   }
 
-  // Ausschnitt setzen: auf den Tag begrenzt, mindestens ZOOM_MIN_MS, ganzer Tag = kein Zoom
+  // Grundausschnitt ohne Zoom: ganzer Tag oder (Standard) nur der Zeitraum mit Sonne bzw. PV-Leistung,
+  // je eine halbe Stunde Rand, auf halbe Stunden gerundet
+  _curveBase(rows, dayStart) {
+    const full = [dayStart, dayStart + 24 * 3600 * 1000];
+    // Haus, Akku und Netz haben auch nachts Werte: dann immer der ganze Tag
+    if (this._dayMode === "full" || rows.some((r) => !isPvKey(r.key))) return full;
+    let a = Infinity, b = -Infinity;
+    for (const r of rows) for (const bin of r.bins) if (bin[3] > 5) { a = Math.min(a, bin[0]); b = Math.max(b, bin[0] + BIN_MS); }
+    const sun = this._sunTimes(dayStart);
+    if (sun) { a = Math.min(a, sun[0]); b = Math.max(b, sun[1]); }
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return full;
+    const half = 30 * 60 * 1000;
+    a = dayStart + Math.floor((a - half - dayStart) / half) * half;
+    b = dayStart + Math.ceil((b + half - dayStart) / half) * half;
+    return [Math.max(a, full[0]), Math.min(b, full[1])];
+  }
+
+  // Ausschnitt setzen: auf den Tag begrenzt, mindestens ZOOM_MIN_MS; entspricht er dem Grundausschnitt, gibt es keinen Zoom
   _setZoom(a, b) {
     const d0 = this._dayStart, d1 = d0 + 24 * 3600 * 1000;
+    const base = this._curves[this._view === "strings" ? "strings" : "main"]?.base ?? [d0, d1];
     let span = Math.min(Math.max(b - a, ZOOM_MIN_MS), d1 - d0);
-    if (span >= d1 - d0 - 1000) { this._zoom = null; return; }
+    if (span >= d1 - d0 - 1000) { this._zoom = base[1] - base[0] >= d1 - d0 - 1000 ? null : [d0, d1]; return; }
     a = Math.min(Math.max(a, d0), d1 - span);
     this._zoom = [a, a + span];
   }
@@ -851,9 +876,8 @@ class PVSummaryPanel extends HTMLElement {
   _renderCurve(chartId, title, icon, defs, opts = {}) {
     const dayStart = this._dayStart, today = this._isToday;
     const now = today ? Date.now() : dayStart + 24 * 3600 * 1000;
-    const [t0, t1] = this._zoom ?? [dayStart, dayStart + 24 * 3600 * 1000];
     const hidden = this._hiddenFor(chartId);
-    const withData = [];
+    const rows = [];
     for (const def of defs) {
       const id = this._id(def.key);
       const all = id ? (this._history[id] || []).slice() : [];
@@ -862,10 +886,14 @@ class PVSummaryPanel extends HTMLElement {
       if (!all.length) continue;
       // Geglättet: 5-Minuten-Abschnitte mit Mittelwert, Minimum und Maximum
       const bins = binSeries(all, dayStart, now);
-      // Sichtbar: Abschnitte im Ausschnitt plus je einer davor und danach, damit die Linie bis an den Rand reicht
-      const vis = bins.filter((b) => b[0] + 2 * BIN_MS > t0 && b[0] - BIN_MS < t1);
-      if (vis.length) withData.push({ ...def, bins, vis });
+      if (bins.length) rows.push({ ...def, bins });
     }
+    const base = this._curveBase(rows.filter((r) => !hidden.has(r.key)), dayStart);
+    const [t0, t1] = this._zoom ?? base;
+    // Sichtbar: Abschnitte im Ausschnitt plus je einer davor und danach, damit die Linie bis an den Rand reicht
+    const withData = rows
+      .map((r) => ({ ...r, vis: r.bins.filter((b) => b[0] + 2 * BIN_MS > t0 && b[0] - BIN_MS < t1) }))
+      .filter((r) => r.vis.length);
     const series = withData.filter((s) => !hidden.has(s.key));
     // Gestapelt: jede Fläche liegt auf der Summe der vorherigen Reihen
     const stacked = opts.stacked && series.length > 0;
@@ -959,7 +987,7 @@ class PVSummaryPanel extends HTMLElement {
       }
     }
     paths = `<clipPath id="clip-${chartId}"><rect x="${L}" y="0" width="${W - L - R}" height="${H}"/></clipPath><g clip-path="url(#clip-${chartId})">${paths}</g>`;
-    this._curves[chartId] = { W, t0, t1, now, x, y, tAt, L, R, stacked, series, dayStart, mid };
+    this._curves[chartId] = { W, t0, t1, now, x, y, tAt, L, R, stacked, series, dayStart, mid, base };
     const sel = `<rect class="sel" x="0" y="${T}" width="0" height="${H - T - B}" fill="var(--primary-color, #03a9f4)" fill-opacity="0.15" style="display:none"/>`;
     const hover = `<g class="hover" style="display:none"><line class="hl" y1="${T}" y2="${H - B}" stroke="var(--primary-text-color)" stroke-opacity="0.4" stroke-width="1"/>${series.map((s) => `<circle r="4" fill="${s.color}" stroke="var(--card-background-color,#fff)" stroke-width="2"/>`).join("")}</g>`;
     // Legende: Klick blendet die Linie aus bzw. wieder ein
@@ -970,7 +998,12 @@ class PVSummaryPanel extends HTMLElement {
     const modes = opts.modes ? `<span class="navbtns">
         <button class="navbtn ${stacked ? "" : "active"}" data-nav="smode-lines">${TT("Linien", "Lines")}</button>
         <button class="navbtn ${stacked ? "active" : ""}" data-nav="smode-stack">${TT("Gestapelt", "Stacked")}</button></span>` : "";
-    const nav = `<span class="navbtns">
+    const fullDay = base[1] - base[0] >= 24 * 3600 * 1000 - 1000;
+    const forced = this._dayMode !== "full" && fullDay && rows.some((r) => !hidden.has(r.key) && !isPvKey(r.key));
+    const dmode = `<span class="navbtns">
+        <button class="navbtn ${fullDay ? "" : "active"}" data-nav="dmode-day" title="${forced ? TT("Mit eingeblendetem Haus, Akku oder Netz wird immer der ganze Tag gezeigt", "With house, battery or grid shown the whole day is always displayed") : TT("Nur der Zeitraum mit Sonne bzw. Leistung", "Only the period with sun or power")}">${TT("Tag", "Day")}</button>
+        <button class="navbtn ${fullDay ? "active" : ""}" data-nav="dmode-full">${TT("Ganzer Tag", "Full day")}</button></span>`;
+    const nav = `${dmode}<span class="navbtns">
         ${this._zoom ? `<button class="navbtn" data-nav="zoom-reset">${TT("Zoom zurücksetzen", "Reset zoom")}</button>` : ""}
         <button class="navbtn" data-nav="day-prev" title="${TT("Vortag", "Previous day")}">‹</button>
         <button class="navbtn ${today ? "active" : ""}" data-nav="day-today">${TT("Heute", "Today")}</button>
@@ -994,7 +1027,7 @@ class PVSummaryPanel extends HTMLElement {
       };
       const px = (ev) => { const c = this._curves[chartId]; return Math.min(Math.max(fx(ev.clientX), c.L), c.W - c.R); };
       // Aktueller Ausschnitt (kann dem gezeichneten Diagramm einen Frame voraus sein)
-      const range = () => this._zoom ?? [this._dayStart, this._dayStart + 24 * 3600 * 1000];
+      const range = () => this._zoom ?? this._curves[chartId].base;
       const span = () => range()[1] - range()[0];
       const timeAt = (x) => { const c = this._curves[chartId]; return range()[0] + ((x - c.L) / (c.W - c.L - c.R)) * span(); };
       const resetZoom = () => { if (this._zoom) { this._hover = null; this._onNav("zoom-reset"); } };
@@ -1525,6 +1558,13 @@ function sunIcon(up) {
   return `<g stroke="${SUN_COLOR}" stroke-width="1.3" fill="none" stroke-linecap="round"><path d="M-6 3 A6 6 0 0 1 6 3"/><line x1="-8" y1="3" x2="8" y2="3"/>`
     + `<line x1="0" y1="-4" x2="0" y2="-9"/><path d="${up ? "M-2.5 -6.5 L0 -9 L2.5 -6.5" : "M-2.5 -6.5 L0 -4 L2.5 -6.5"}"/></g>`;
 }
+
+// PV-Reihen (Anlage und Strings) sind nachts 0, Haus, Akku und Netz nicht
+function isPvKey(key) { return key === "power" || key.endsWith("|string_power"); }
+
+// Einstellungen im Browser merken (kann in privaten Fenstern fehlen)
+function loadPref(key, fallback) { try { return localStorage.getItem(key) || fallback; } catch (err) { return fallback; } }
+function savePref(key, value) { try { localStorage.setItem(key, value); } catch (err) { /* nicht speicherbar */ } }
 
 // Autarkie in %: Anteil des Hausverbrauchs, der nicht aus dem Netz kam
 function autarky(imp, house) {
