@@ -1,4 +1,4 @@
-<img src="custom_components/pv_overview/brand/icon.png" alt="PV Summary" width="128" align="right">
+<img src="https://raw.githubusercontent.com/berwil84afk/ha-pv-summary/main/custom_components/pv_overview/brand/icon.png" alt="PV Summary" width="128" align="right">
 
 # PV Summary, Home Assistant Integration
 
@@ -8,7 +8,7 @@ Du gibst nur **einen Sensor mit der aktuellen PV-Leistung** (W oder kW) an, die 
 
 Voraussetzung ist Home Assistant **2025.3** oder neuer. Einrichtung und Dashboard gibt es auf Deutsch und Englisch, sie folgen der Spracheinstellung von Home Assistant.
 
-<img src="docs/dashboard.jpg" alt="PV Summary Dashboard mit Beispieldaten" width="640">
+<img src="https://raw.githubusercontent.com/berwil84afk/ha-pv-summary/main/docs/dashboard.jpg" alt="PV Summary Dashboard mit Beispieldaten" width="640">
 
 ## Installation über HACS
 

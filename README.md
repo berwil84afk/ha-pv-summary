@@ -1,4 +1,4 @@
-<img src="custom_components/pv_overview/brand/icon.png" alt="PV Summary" width="128" align="right">
+<img src="https://raw.githubusercontent.com/berwil84afk/ha-pv-summary/main/custom_components/pv_overview/brand/icon.png" alt="PV Summary" width="128" align="right">
 
 # PV Summary, Home Assistant Integration
 
@@ -8,7 +8,7 @@ You only provide **one sensor with the current PV power** (W or kW), and the int
 
 Requires Home Assistant **2025.3** or newer. Setup and dashboard are available in English and German and follow the Home Assistant language setting.
 
-<img src="docs/dashboard.jpg" alt="PV Summary dashboard with sample data" width="640">
+<img src="https://raw.githubusercontent.com/berwil84afk/ha-pv-summary/main/docs/dashboard.jpg" alt="PV Summary dashboard with sample data" width="640">
 
 ## Installation via HACS
 
