@@ -959,7 +959,7 @@ class PVSummaryPanel extends HTMLElement {
           + `<text x="${(right ? xs + 22 : xs - 22).toFixed(1)}" y="${T + 16}" text-anchor="${right ? "start" : "end"}" class="sunt">${time}</text>`;
       });
     }
-    // Sonnenhöhe als blasse Fläche, ihr Höchststand reicht bis zum höchsten Wert im Diagramm
+    // Sonnenhöhe als sehr blasse Fläche ohne Randlinie, ihr Höchststand reicht bis zum höchsten Wert im Diagramm
     let arc = "";
     const lat = this._hass?.config?.latitude, lon = this._hass?.config?.longitude;
     if (sun && typeof lat === "number" && typeof lon === "number") {
@@ -975,8 +975,7 @@ class PVSummaryPanel extends HTMLElement {
         for (let tt = a; tt < b; tt += stepMs) pts.push([tt, sunElevation(tt, lat, lon)]);
         pts.push([b, sunElevation(b, lat, lon)]);
         const line = pts.map((q) => `${x(q[0]).toFixed(1)},${ye(q[1]).toFixed(1)}`).join(" ");
-        arc = `<polygon points="${x(a).toFixed(1)},${ye(0).toFixed(1)} ${line} ${x(b).toFixed(1)},${ye(0).toFixed(1)}" fill="${SUN_COLOR}" fill-opacity="0.08" stroke="none" pointer-events="none"/>`
-          + `<polyline points="${line}" fill="none" stroke="${SUN_COLOR}" stroke-opacity="0.35" stroke-width="1" pointer-events="none"/>`;
+        arc = `<polygon points="${x(a).toFixed(1)},${ye(0).toFixed(1)} ${line} ${x(b).toFixed(1)},${ye(0).toFixed(1)}" fill="${SUN_COLOR}" fill-opacity="0.05" stroke="none" pointer-events="none"/>`;
       }
     }
     grid = night + arc + grid;
