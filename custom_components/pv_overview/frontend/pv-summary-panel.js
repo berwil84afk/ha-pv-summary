@@ -529,6 +529,15 @@ class PVSummaryPanel extends HTMLElement {
       byDay = {};
     }
     if (!this._ovl || this._entry !== entry) return;
+    // Heute aus den Live-Sensoren (die Statistik hinkt bis zu einer Stunde hinterher)
+    const liveHouse = this._num("house_today");
+    if (liveHouse !== null) {
+      const start = new Date(); start.setHours(0, 0, 0, 0);
+      const d = (byDay[start.toDateString()] ||= { start });
+      d.house = liveHouse;
+      if (this._num("today") !== null) d.pv = this._num("today");
+      if (this._num("grid_import_today") !== null) d.imp = this._num("grid_import_today");
+    }
     this._ovl.days = Object.values(byDay).filter((d) => d.house !== undefined).sort((a, b) => a.start - b.start).slice(-30);
     this._ovl.loading = false;
     this._renderOverlay();
@@ -626,7 +635,7 @@ class PVSummaryPanel extends HTMLElement {
     const compact = slot < 100 && slot >= 62;
     const every = slot >= 62 ? 1 : [5, 10, 15].find((k) => slot * k >= 100) ?? 30;
     let svg = `<defs><pattern id="ovl-hatch" width="5" height="5" patternTransform="rotate(45)" patternUnits="userSpaceOnUse"><rect width="5" height="5" fill="${COLORS.house}" fill-opacity="0.3"/><line x1="0" y1="0" x2="0" y2="5" stroke="${COLORS.house}" stroke-width="2"/></pattern></defs>`;
-    for (const v of ticks(0, maxV)) svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--divider-color, rgba(0,0,0,.1))"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v, 0)}</text>`;
+    for (const v of ticks(0, maxV)) svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--divider-color, rgba(0,0,0,.1))"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmtAxis(v)}</text>`;
     days.forEach((d, i) => {
       const cx = L + slot * i + slot / 2, gx = cx - gw / 2;
       const hw = gw * 0.66, pw = gw * 0.3;
@@ -950,7 +959,27 @@ class PVSummaryPanel extends HTMLElement {
           + `<text x="${(right ? xs + 22 : xs - 22).toFixed(1)}" y="${T + 16}" text-anchor="${right ? "start" : "end"}" class="sunt">${time}</text>`;
       });
     }
-    grid = night + grid;
+    // Sonnenhöhe als blasse Fläche, ihr Höchststand reicht bis zum höchsten Wert im Diagramm
+    let arc = "";
+    const lat = this._hass?.config?.latitude, lon = this._hass?.config?.longitude;
+    if (sun && typeof lat === "number" && typeof lon === "number") {
+      const a = Math.max(sun[0], t0), b = Math.min(sun[1], t1);
+      // Höchster Sonnenstand des Tages liegt auf Höhe des höchsten Werts im Diagramm (ohne Werte: volle Höhe)
+      let dayMax = 0;
+      for (let tt = sun[0]; tt <= sun[1]; tt += 5 * 60000) dayMax = Math.max(dayMax, sunElevation(tt, lat, lon));
+      const top = Math.max(...vals, 0) > 0 ? y(Math.max(...vals)) : T;
+      const ye = (el) => H - B - (Math.max(el, 0) / Math.max(dayMax, 1)) * (H - B - top);
+      if (b > a) {
+        const pts = [];
+        const stepMs = Math.max(60000, (b - a) / 120);
+        for (let tt = a; tt < b; tt += stepMs) pts.push([tt, sunElevation(tt, lat, lon)]);
+        pts.push([b, sunElevation(b, lat, lon)]);
+        const line = pts.map((q) => `${x(q[0]).toFixed(1)},${ye(q[1]).toFixed(1)}`).join(" ");
+        arc = `<polygon points="${x(a).toFixed(1)},${ye(0).toFixed(1)} ${line} ${x(b).toFixed(1)},${ye(0).toFixed(1)}" fill="${SUN_COLOR}" fill-opacity="0.08" stroke="none" pointer-events="none"/>`
+          + `<polyline points="${line}" fill="none" stroke="${SUN_COLOR}" stroke-opacity="0.35" stroke-width="1" pointer-events="none"/>`;
+      }
+    }
+    grid = night + arc + grid;
 
     let paths = "";
     const xy = (p) => `${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`;
@@ -1194,14 +1223,16 @@ class PVSummaryPanel extends HTMLElement {
     if (month) {
       const m = this._prodMonth;
       slots = new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate();
-      const byDay = Object.fromEntries(this._monthDays.map((d) => [d.start.getDate(), d]));
+      const isCur = m.getFullYear() === now.getFullYear() && m.getMonth() === now.getMonth();
+      const monthDays = isCur ? withToday(this._monthDays, this._num("today")) : this._monthDays;
+      const byDay = Object.fromEntries(monthDays.map((d) => [d.start.getDate(), d]));
       days = Array.from({ length: slots }, (_, i) => byDay[i + 1] || null);
       title = `${TT("Produktion im", "Production in")} ${m.toLocaleDateString(LOCALE(), { month: "long", year: "numeric" })}`;
       // Ø des Monats über abgeschlossene Tage mit Werten
       const done = this._monthDays.filter((d) => d.start.toDateString() !== todayKey && d.v > 0);
       avg = done.length ? done.reduce((a, d) => a + d.v, 0) / done.length : null;
     } else {
-      days = this._days.slice(-30);
+      days = withToday(this._days, this._num("today")).slice(-30);
       slots = 30;
       title = TT("Produktion der letzten 30 Tage", "Production, last 30 days");
       avg = this._num("avg_daily_30");
@@ -1220,7 +1251,7 @@ class PVSummaryPanel extends HTMLElement {
     const y = (v) => T + (1 - v / maxV) * (H - T - B);
     const bestV = Math.max(...present.map((d) => d.v));
     let svg = "";
-    for (const v of ticks(0, maxV)) svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--divider-color, rgba(0,0,0,.1))"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v, 0)}</text>`;
+    for (const v of ticks(0, maxV)) svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--divider-color, rgba(0,0,0,.1))"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmtAxis(v)}</text>`;
     const offset = month ? 0 : slots - days.length;
     const every = W < 450 ? 10 : 5;
     days.forEach((d, i) => {
@@ -1322,7 +1353,16 @@ class PVSummaryPanel extends HTMLElement {
   }
 
   _renderMonths() {
-    const months = this._months.slice(-12);
+    // Laufender Monat aus dem Live-Sensor (die Statistik hinkt bis zu einer Stunde hinterher)
+    const months = this._months.slice(-12).map((m) => m);
+    const liveMonth = this._num("month");
+    if (liveMonth !== null) {
+      const first = new Date(); first.setHours(0, 0, 0, 0); first.setDate(1);
+      const last = months[months.length - 1];
+      if (last && last.start.getFullYear() === first.getFullYear() && last.start.getMonth() === first.getMonth()) months[months.length - 1] = { ...last, v: liveMonth };
+      else months.push({ start: first, v: liveMonth });
+      if (months.length > 12) months.shift();
+    }
     if (!months.length) return `<div class="card"><h3><ha-icon icon="mdi:calendar-month"></ha-icon>${TT("Produktion der letzten 12 Monate", "Production, last 12 months")}</h3><div class="empty">${this._loading.days ? LOADING() : TT("Noch keine Monatsdaten.", "No monthly data yet.")}</div></div>`;
     const W = this._chartWidth(0.5), H = 190, L = 40, R = 6, T = 18, B = 22;
     const maxV = niceMax(Math.max(1, ...months.map((m) => m.v)));
@@ -1330,7 +1370,7 @@ class PVSummaryPanel extends HTMLElement {
     const y = (v) => T + (1 - v / maxV) * (H - T - B);
     const monthName = (d) => d.toLocaleDateString(LOCALE(), { month: "short" }).replace(".", "");
     let svg = "";
-    for (const v of ticks(0, maxV)) svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--divider-color, rgba(0,0,0,.1))"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v, 0)}</text>`;
+    for (const v of ticks(0, maxV)) svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--divider-color, rgba(0,0,0,.1))"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmtAxis(v)}</text>`;
     const offset = 12 - months.length;
     const thisMonth = new Date().getMonth();
     months.forEach((m, i) => {
@@ -1348,7 +1388,7 @@ class PVSummaryPanel extends HTMLElement {
     const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
     return (this._entry.strings || []).map((s, i) => {
       const k = (key) => `${s.id}|${key}`;
-      const days = this._stringDays[this._id(k("string_total"))] || [];
+      const days = withToday(this._stringDays[this._id(k("string_total"))] || [], this._num(k("string_today")));
       return {
         s, k, days,
         color: STRING_COLORS[i % STRING_COLORS.length],
@@ -1412,7 +1452,7 @@ class PVSummaryPanel extends HTMLElement {
     const bw = Math.max(1, (gw - 3) / info.length);
     const y = (v) => T + (1 - v / maxV) * (H - T - B);
     let svg = "";
-    for (const v of ticks(0, maxV)) svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--divider-color, rgba(0,0,0,.1))"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v, v < 10 ? 1 : 0)}</text>`;
+    for (const v of ticks(0, maxV)) svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--divider-color, rgba(0,0,0,.1))"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmtAxis(v)}</text>`;
     const offset = 30 - dayKeys.length;
     dayKeys.forEach((day, i) => {
       const gx = L + (offset + i) * gw + 1.5;
@@ -1453,6 +1493,8 @@ function fmtW(w) { return `${fmtWValue(w)} ${fmtWUnit(w)}`; }
 function fmtWValue(w) { if (w === null || !Number.isFinite(w)) return "–"; return Math.abs(w) >= 10000 ? fmt(w / 1000, 1) : fmt(w, 0); }
 function fmtWUnit(w) { return w !== null && Math.abs(w) >= 10000 ? "kW" : "W"; }
 function fmtWShort(w) { return Math.abs(w) >= 1000 ? `${fmt(w / 1000, w % 1000 ? 1 : 0)} kW` : `${fmt(w, 0)} W`; }
+// Achsenwert: ganze Zahlen ohne, Zwischenschritte (z. B. 0,8 · 1,6 · 2,4) mit einer Nachkommastelle
+function fmtAxis(v) { return fmt(v, Number.isInteger(v) ? 0 : 1); }
 function fmtHours(h) { const m = Math.round(h * 60); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")} h`; }
 function fmtTime(iso) { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleTimeString(LOCALE(), { hour: "2-digit", minute: "2-digit" }); }
 function fmtDate(iso) { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleDateString(LOCALE(), { day: "2-digit", month: "2-digit", year: "numeric" }); }
@@ -1553,10 +1595,32 @@ function sunTimes(ms, lat, lon) {
   return [toMs(noon - (set - noon)), toMs(set)];
 }
 
+// Sonnenhöhe in Grad (Näherung wie bei sunTimes, Genauigkeit etwa 1°)
+function sunElevation(ms, lat, lon) {
+  const rad = Math.PI / 180, d = ms / 864e5 - 0.5 + 2440588 - 2451545;
+  const M = rad * (357.5291 + 0.98560028 * d);
+  const L = M + rad * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M)) + rad * 102.9372 + Math.PI;
+  const e = rad * 23.4397;
+  const dec = Math.asin(Math.sin(e) * Math.sin(L));
+  const ra = Math.atan2(Math.sin(L) * Math.cos(e), Math.cos(L));
+  const H = rad * (280.16 + 360.9856235 * d) + rad * lon - ra;
+  const phi = rad * lat;
+  return Math.asin(Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(H)) / rad;
+}
+
 // Kleine Sonne am Horizont mit Pfeil nach oben (Aufgang) bzw. unten (Untergang)
 function sunIcon(up) {
   return `<g stroke="${SUN_COLOR}" stroke-width="1.3" fill="none" stroke-linecap="round"><path d="M-6 3 A6 6 0 0 1 6 3"/><line x1="-8" y1="3" x2="8" y2="3"/>`
     + `<line x1="0" y1="-4" x2="0" y2="-9"/><path d="${up ? "M-2.5 -6.5 L0 -9 L2.5 -6.5" : "M-2.5 -6.5 L0 -4 L2.5 -6.5"}"/></g>`;
+}
+
+// Tageswerte [{start, v}] mit dem heutigen Tag aus dem Live-Sensor (ersetzt bzw. ergänzt den Statistikwert)
+function withToday(list, live) {
+  if (live === null || live === undefined) return list;
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  const out = list.filter((d) => d.start.toDateString() !== start.toDateString());
+  out.push({ start, v: live });
+  return out.sort((a, b) => a.start - b.start);
 }
 
 // PV-Reihen (Anlage und Strings) sind nachts 0, Haus, Akku und Netz nicht
