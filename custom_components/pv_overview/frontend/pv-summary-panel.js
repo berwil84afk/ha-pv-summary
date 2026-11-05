@@ -1290,7 +1290,7 @@ class PVSummaryPanel extends HTMLElement {
 
   _renderBattery() {
     const batteries = this._entry.batteries || [];
-    const fmtState = (st) => st ? `${fmt(parseFloat(st.state), 1)} ${st.attributes.unit_of_measurement || ""}` : null;
+    const fmtState = (st) => st ? `${fmt(parseFloat(st.state), 1)} ${escapeHtml(st.attributes.unit_of_measurement || "")}` : null;
     const block = (b) => {
       const k = (key) => `${b.id}|${key}`;
       const soc = this._num(k("battery_soc"));
@@ -1399,7 +1399,7 @@ class PVSummaryPanel extends HTMLElement {
   }
 
   _renderStringTiles() {
-    const fmtState = (st) => st ? `${fmt(parseFloat(st.state), 1)} ${st.attributes.unit_of_measurement || ""}` : "–";
+    const fmtState = (st) => st ? `${fmt(parseFloat(st.state), 1)} ${escapeHtml(st.attributes.unit_of_measurement || "")}` : "–";
     const tiles = this._stringInfo().map(({ s, k, color, today, yesterday }) => {
       const volt = this._state(k("string_voltage"));
       const curr = this._state(k("string_current"));
