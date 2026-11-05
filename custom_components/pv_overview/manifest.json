@@ -1,14 +1,14 @@
 {
   "domain": "pv_overview",
   "name": "PV Summary",
+  "after_dependencies": ["history", "recorder"],
   "codeowners": ["@berwil84afk"],
   "config_flow": true,
-  "after_dependencies": ["history", "recorder"],
   "dependencies": ["frontend", "http", "panel_custom", "websocket_api"],
   "documentation": "https://github.com/berwil84afk/ha-pv-summary",
   "integration_type": "service",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/berwil84afk/ha-pv-summary/issues",
   "requirements": [],
-  "version": "1.13.1"
+  "version": "1.13.2"
 }
