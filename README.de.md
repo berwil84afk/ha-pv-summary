@@ -12,10 +12,14 @@ Voraussetzung ist Home Assistant **2025.3** oder neuer. Einrichtung und Dashboar
 
 ## Installation über HACS
 
+1. In HACS nach **„PV Summary“** suchen → Herunterladen → Home Assistant neu starten
+2. **Einstellungen → Geräte & Dienste → Integration hinzufügen → „PV Summary“**
+
+Taucht PV Summary in der HACS-Suche noch nicht auf (die Aufnahme in die Standardliste von HACS läuft noch), füge es zuerst als benutzerdefiniertes Repository hinzu:
+
 1. HACS → Menü (⋮) → **Benutzerdefinierte Repositories**
 2. Repository `https://github.com/berwil84afk/ha-pv-summary`, Typ **Integration** → Hinzufügen
-3. „PV Summary“ in HACS suchen → Herunterladen → Home Assistant neu starten
-4. **Einstellungen → Geräte & Dienste → Integration hinzufügen → „PV Summary“**
+3. Danach weiter mit den Schritten oben
 
 ## Manuelle Installation
 
