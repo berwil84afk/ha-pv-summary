@@ -920,8 +920,33 @@ class PVSummaryPanel extends HTMLElement {
     const vals = stacked
       ? stackTimes.map((tt) => series[series.length - 1].cumAt(tt))
       : series.flatMap((s) => s.vis.flatMap((b) => [b[2], b[3]]));
-    // Achse richtet sich nach dem höchsten Wert im sichtbaren Ausschnitt
-    const maxV = niceMax(Math.max(10, ...vals)); // mindestens 10 W, damit sich die Beschriftung nicht wiederholt
+    // Sonnenbogen: Strahlungsstärke (Sinus der Sonnenhöhe), so hochgerechnet, dass er durch den besten
+    // PV-Wert des Tages geht und nie unter einem Messwert liegt; Werte unter 10° Sonnenhöhe zählen nicht
+    const sun = this._sunTimes(dayStart);
+    const lat = this._hass?.config?.latitude, lon = this._hass?.config?.longitude;
+    const hasSun = !!sun && typeof lat === "number" && typeof lon === "number";
+    const sinEl = (tt) => Math.max(0, Math.sin((sunElevation(tt, lat, lon) * Math.PI) / 180));
+    let arcK = 0;
+    const pvRows = hasSun ? rows.filter((r) => !hidden.has(r.key) && isPvKey(r.key)) : [];
+    if (pvRows.length) {
+      const minSin = Math.sin((10 * Math.PI) / 180);
+      for (const tt of new Set(pvRows.flatMap((r) => r.bins.map((b) => b[0])))) {
+        const s = sinEl(mid([tt]));
+        if (s < minSin) continue;
+        const v = pvRows.reduce((a, r) => a + Math.max(binAt(r.bins, tt)?.[1] ?? 0, 0), 0);
+        arcK = Math.max(arcK, v / s);
+      }
+    }
+    const arcA = hasSun ? Math.max(sun[0], t0) : 0, arcB = hasSun ? Math.min(sun[1], t1) : 0;
+    const arcPts = [];
+    if (hasSun && arcB > arcA) {
+      const stepMs = Math.max(60000, (arcB - arcA) / 120);
+      for (let tt = arcA; tt < arcB; tt += stepMs) arcPts.push([tt, sinEl(tt)]);
+      arcPts.push([arcB, sinEl(arcB)]);
+    }
+    const arcTop = arcK > 0 ? arcK * Math.max(0, ...arcPts.map((q) => q[1])) : 0;
+    // Achse richtet sich nach dem höchsten Wert im sichtbaren Ausschnitt (samt Sonnenbogen)
+    const maxV = niceMax(Math.max(10, ...vals, arcTop)); // mindestens 10 W, damit sich die Beschriftung nicht wiederholt
     const minV = Math.min(0, ...vals) < 0 ? -niceMax(-Math.min(...vals)) : 0;
     const x = (tt) => L + ((tt - t0) / (t1 - t0)) * (W - L - R);
     const tAt = (px) => t0 + ((px - L) / (W - L - R)) * (t1 - t0);
@@ -942,7 +967,6 @@ class PVSummaryPanel extends HTMLElement {
     }
     if (today && now >= t0 && now <= t1) grid += `<line x1="${x(now)}" x2="${x(now)}" y1="${T}" y2="${H - B}" stroke="var(--secondary-text-color)" stroke-dasharray="2 4" stroke-width="1"/>`;
     // Nacht abgedunkelt, Sonnenauf- und -untergang als Linie mit Uhrzeit
-    const sun = this._sunTimes(dayStart);
     let night = "";
     if (sun) {
       const shade = (a, b) => {
@@ -959,24 +983,20 @@ class PVSummaryPanel extends HTMLElement {
           + `<text x="${(right ? xs + 22 : xs - 22).toFixed(1)}" y="${T + 16}" text-anchor="${right ? "start" : "end"}" class="sunt">${time}</text>`;
       });
     }
-    // Sonnenhöhe als sehr blasse Fläche ohne Randlinie, ihr Höchststand reicht bis zum höchsten Wert im Diagramm
+    // Sonnenbogen als sehr blasse Fläche ohne Randlinie
     let arc = "";
-    const lat = this._hass?.config?.latitude, lon = this._hass?.config?.longitude;
-    if (sun && typeof lat === "number" && typeof lon === "number") {
-      const a = Math.max(sun[0], t0), b = Math.min(sun[1], t1);
-      // Höchster Sonnenstand des Tages liegt auf Höhe des höchsten Werts im Diagramm (ohne Werte: volle Höhe)
-      let dayMax = 0;
-      for (let tt = sun[0]; tt <= sun[1]; tt += 5 * 60000) dayMax = Math.max(dayMax, sunElevation(tt, lat, lon));
-      const top = Math.max(...vals, 0) > 0 ? y(Math.max(...vals)) : T;
-      const ye = (el) => H - B - (Math.max(el, 0) / Math.max(dayMax, 1)) * (H - B - top);
-      if (b > a) {
-        const pts = [];
-        const stepMs = Math.max(60000, (b - a) / 120);
-        for (let tt = a; tt < b; tt += stepMs) pts.push([tt, sunElevation(tt, lat, lon)]);
-        pts.push([b, sunElevation(b, lat, lon)]);
-        const line = pts.map((q) => `${x(q[0]).toFixed(1)},${ye(q[1]).toFixed(1)}`).join(" ");
-        arc = `<polygon points="${x(a).toFixed(1)},${ye(0).toFixed(1)} ${line} ${x(b).toFixed(1)},${ye(0).toFixed(1)}" fill="${SUN_COLOR}" fill-opacity="0.05" stroke="none" pointer-events="none"/>`;
+    if (arcPts.length) {
+      let ye;
+      if (arcK > 0) ye = (s) => y(arcK * s);
+      else {
+        // Ohne brauchbaren PV-Wert: höchster Sonnenstand des Tages auf Höhe des höchsten Werts (ohne Werte: volle Höhe)
+        let dayMax = 0;
+        for (let tt = sun[0]; tt <= sun[1]; tt += 5 * 60000) dayMax = Math.max(dayMax, sinEl(tt));
+        const top = Math.max(...vals, 0) > 0 ? y(Math.max(...vals)) : T;
+        ye = (s) => H - B - (s / Math.max(dayMax, 0.01)) * (H - B - top);
       }
+      const line = arcPts.map((q) => `${x(q[0]).toFixed(1)},${ye(q[1]).toFixed(1)}`).join(" ");
+      arc = `<polygon points="${x(arcA).toFixed(1)},${ye(0).toFixed(1)} ${line} ${x(arcB).toFixed(1)},${ye(0).toFixed(1)}" fill="${SUN_COLOR}" fill-opacity="0.05" stroke="none" pointer-events="none"/>`;
     }
     grid = night + arc + grid;
 
