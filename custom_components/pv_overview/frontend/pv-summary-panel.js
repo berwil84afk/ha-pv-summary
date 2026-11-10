@@ -1437,9 +1437,13 @@ class PVSummaryPanel extends HTMLElement {
       svg += `<rect data-hm="${d.getTime()}" x="${xp.toFixed(1)}" y="${yp.toFixed(1)}" width="${cs.toFixed(1)}" height="${ch.toFixed(1)}" rx="2" fill="${color(v)}"${isBest ? ` stroke="#ef9f27" stroke-width="1.6" data-best="1"` : ""}/>`;
     }
     const sum = year === cur && this._num("year") !== null ? this._num("year") : present.reduce((a, d) => a + d.v, 0);
+    // Ø nur über abgeschlossene Tage mit Produktion; Tage mit 0 kWh (z. B. vor der Inbetriebnahme) und der laufende Tag zählen nicht
+    const todayKey = new Date().toDateString();
+    const done = present.filter((d) => d.v > 0 && d.start.toDateString() !== todayKey);
+    const avg = done.length ? done.reduce((a, d) => a + d.v, 0) / done.length : null;
     const legend = `<span class="hmleg">${TT("weniger", "less")} ${steps.map((c) => `<i style="background:${c}"></i>`).join("")} ${TT("mehr", "more")}</span>
       <span class="hmleg"><i style="outline:1.5px solid #ef9f27;outline-offset:-1.5px"></i> ${TT("bester Tag", "best day")}</span>
-      <span class="hmsum">${fmt(sum, 0)} kWh · Ø ${fmt(sum / present.length, 1)} kWh/${TT("Tag", "day")}</span>`;
+      <span class="hmsum">${fmt(sum, 0)} kWh${avg !== null ? ` · Ø ${fmt(avg, 1)} kWh/${TT("Tag", "day")}` : ""}</span>`;
     return `<div class="card yearcard">${head}<div class="hm-wrap"><svg viewBox="0 0 ${W.toFixed(1)} ${H.toFixed(1)}" style="max-width:${Math.round(W)}px">${svg}</svg><div class="tip" style="display:none"></div></div><div class="hmfoot">${legend}</div></div>`;
   }
 
