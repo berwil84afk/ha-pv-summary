@@ -114,7 +114,7 @@ The integration brings its own dashboard. After setup it appears automatically a
 - **Production, last 30 days** (switchable to single months) and **last 12 months** as bars, with an average line and the best day highlighted. Negative values (meter jump in the statistics) appear as a short red bar.
 - **Periods** (week, month, year, last month and the highlighted total) and **Batteries** (each battery individually, the sums below)
 - **Averages and records**: best day and power record with their date, below them the averages over 7, 30 and 365 days and overall, each with a bar relative to the best day
-- **Production by year**: a calendar heatmap at the bottom of the overview with one square per day. The darker the green (in the dark theme: the brighter), the higher the production, relative to the best day of the year, which has an orange border. Hover or tap a day to see its production, and use ‹ year › to browse past years. Below are the total and the daily average of the year. On a phone the calendar switches to one row per month.
+- **Production by year**: a calendar heatmap at the bottom of the overview with one square per day. The darker the green (in the dark theme: the brighter), the higher the production, relative to the best day of the year, which has an orange border. Hover or tap a day to see its production, and use ‹ year › to browse past years. Below are the total of the year and the average per day with production (days with 0 kWh and today are not counted). On a phone the calendar switches to one row per month.
 
   <img src="https://raw.githubusercontent.com/berwil84afk/ha-pv-summary/main/docs/history.jpg" alt="Production of the last 30 days, last 12 months and by year" width="640">
 
