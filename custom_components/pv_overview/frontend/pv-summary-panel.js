@@ -58,6 +58,13 @@ const STYLE = `
   .tip .dot { width:8px; height:8px; border-radius:50%; }
   .tip .rng { display:block; text-align:right; font-size:11px; color:var(--secondary-text-color); margin:-1px 0 2px; }
   .list { display:grid; gap:10px; font-size:14px; }
+  .hm-wrap { position:relative; }
+  .hm-wrap svg { display:block; width:100%; margin:0 auto; }
+  .hm-wrap rect { cursor:pointer; }
+  .hmfoot { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; margin-top:10px; font-size:12px; color:var(--secondary-text-color); }
+  .hmleg { display:inline-flex; align-items:center; gap:3px; }
+  .hmleg i { display:inline-block; width:10px; height:10px; border-radius:2px; }
+  .hmsum { margin-left:auto; }
   .list .item { cursor:pointer; }
   .list .line { display:flex; justify-content:space-between; gap:8px; }
   .list .line b { font-weight:500; }
@@ -162,10 +169,12 @@ class PVSummaryPanel extends HTMLElement {
     this._prodMonth = null;  // erster Tag des gewählten Monats
     this._monthDays = [];
     this._hidden = {};       // Diagramm -> Set der ausgeblendeten Reihen (nur bis zum nächsten Tag/Zoom)
-    this._loading = {};      // laufende Abfragen: curve, days, month
+    this._year = null;       // angezeigtes Jahr der Heatmap (null = aktuelles Jahr)
+    this._yearDays = {};     // "Statistik-ID|Jahr" -> Tageswerte
+    this._loading = {};      // laufende Abfragen: curve, days, month, year
     this._historyDay = null; // Tag, zu dem this._history gehört
     this._ovl = null;        // offenes Overlay
-    this._stringMode = "lines"; // "lines" oder "stack" (gestapelte Flächen)
+    this._stringMode = loadPref("pv-summary-stringmode", "stack") === "lines" ? "lines" : "stack"; // "stack" (gestapelte Flächen) oder "lines"
     this._dayMode = loadPref("pv-summary-daymode", "day"); // "day" = Produktionszeitraum, "full" = ganzer Tag
   }
 
@@ -353,8 +362,15 @@ class PVSummaryPanel extends HTMLElement {
       this._zoom = null;
       this._hover = null;
       this._render();
+    } else if (action === "year-prev" || action === "year-next") {
+      const cur = new Date().getFullYear();
+      const y = Math.min(cur, (this._year ?? cur) + (action === "year-prev" ? -1 : 1));
+      this._year = y === cur ? null : y;
+      this._fetchYearDays(y);
+      this._render();
     } else if (action === "smode-lines" || action === "smode-stack") {
       this._stringMode = action === "smode-stack" ? "stack" : "lines";
+      savePref("pv-summary-stringmode", this._stringMode);
       this._hover = null;
       this._render();
     } else if (action === "zoom-reset") {
@@ -403,6 +419,7 @@ class PVSummaryPanel extends HTMLElement {
     const stringTotals = strings.map((s) => this._id(`${s.id}|string_total`)).filter(Boolean);
     const jobs = [this._fetchCurveHistory(false)];
     if (this._prodMode === "month") jobs.push(this._fetchMonthDays(false));
+    jobs.push(this._fetchYearDays(new Date().getFullYear(), false));
     if (total) {
       const dayStart = new Date(start); dayStart.setDate(dayStart.getDate() - 29);
       const monthStart = new Date(start.getFullYear(), start.getMonth() - 11, 1);
@@ -468,6 +485,32 @@ class PVSummaryPanel extends HTMLElement {
     }
     if (start === this._dayStart) this._loading.curve = false;
     if (render && entry === this._entry) this._render();
+  }
+
+  // Tageswerte eines Kalenderjahres für die Heatmap; vergangene Jahre ändern sich nicht mehr und werden nur einmal geladen
+  async _fetchYearDays(year, render = true) {
+    const total = this._id("total");
+    if (!total) return;
+    const key = `${total}|${year}`;
+    if (this._yearDays[key] && year < new Date().getFullYear()) return;
+    this._loading.year = true;
+    if (render) this._render();
+    try {
+      const res = await this._hass.callWS({
+        type: "recorder/statistics_during_period",
+        start_time: new Date(year, 0, 1).toISOString(),
+        end_time: new Date(year + 1, 0, 1).toISOString(),
+        statistic_ids: [total],
+        period: "day",
+        types: ["change"],
+        units: { energy: "kWh" },
+      });
+      this._yearDays[key] = (res[total] || []).map((p) => ({ start: new Date(p.start), v: p.change ?? 0 }));
+    } catch (err) {
+      if (!this._yearDays[key]) this._yearDays[key] = [];
+    }
+    this._loading.year = false;
+    if (render) this._render();
   }
 
   // Tageswerte eines Kalendermonats für die Monatsansicht
@@ -693,9 +736,11 @@ class PVSummaryPanel extends HTMLElement {
       );
       if (this._entry.batteries?.length) parts.push(this._renderBattery());
       parts.push(`<div class="row">${this._renderRecords()}${this._renderMonths()}</div>`);
+      if (this._id("total")) parts.push(this._renderYear());
     }
     this._content.innerHTML = parts.join("");
     this._bindCurve();
+    this._bindYear();
   }
 
   _curveCard(chartId) {
@@ -805,8 +850,9 @@ class PVSummaryPanel extends HTMLElement {
         { label: TT("Akku", "Battery"), color: COLORS.bat, v: batToHouse },
         { label: TT("Netz", "Grid"), color: COLORS.grid, v: gridToHouse },
       ] : null, icon: "mdi:home", label: house !== null ? TT("Haus", "House") : TT("Haus/Netz", "House/Grid"), value: house !== null ? fmtW(house) : "≈ " + fmtW(need), key: house !== null ? "house_power" : null },
-      // Leistung öffnet die Lade-/Entladeleistung, die Prozentzahl den Akkustand
-      bat: { x: 220, y: 195, color: soc !== null ? socColor(soc) : COLORS.bat, fill: soc, icon: "mdi:home-battery", label: soc !== null ? `${fmt(soc, 0)} %` : TT("Akku", "Battery"), value: bat !== null ? (bat > 0 ? "+" : bat < 0 ? "−" : "") + fmtW(Math.abs(bat)) : "", key: this._has("battery_power") ? "battery_power" : soc !== null ? "battery_soc" : null, labelKey: bat !== null && soc !== null ? "battery_soc" : null },
+      // Leistung öffnet die Lade-/Entladeleistung, die Prozentzahl den Akkustand;
+      // Ring und Symbol bleiben in der Akku-Farbe, nur die Füllung zeigt den Ladestand farbig
+      bat: { x: 220, y: 195, color: COLORS.bat, fillColor: soc !== null ? socColor(soc) : COLORS.bat, fill: soc, icon: "mdi:home-battery", label: soc !== null ? `${fmt(soc, 0)} %` : TT("Akku", "Battery"), value: bat !== null ? (bat > 0 ? "+" : bat < 0 ? "−" : "") + fmtW(Math.abs(bat)) : "", key: this._has("battery_power") ? "battery_power" : soc !== null ? "battery_soc" : null, labelKey: bat !== null && soc !== null ? "battery_soc" : null },
       grid: { x: 220, y: 45, color: COLORS.grid, icon: "mdi:transmission-tower", label: grid === null || Math.abs(grid) <= 1 ? TT("Netz", "Grid") : grid < 0 ? TT("Einspeisung", "Export") : TT("Bezug", "Import"), value: grid !== null ? fmtW(Math.abs(grid)) : "", key: this._has("grid_power") ? "grid_power" : null },
     };
     const line = (a, b, forward, backward, colorA, colorB) => {
@@ -828,7 +874,7 @@ class PVSummaryPanel extends HTMLElement {
       <g class="${n.key ? "click" : ""}" ${n.key ? `data-key="${n.key}"` : ""}>
         <circle cx="${n.x}" cy="${n.y}" r="40" fill="var(--card-background-color, #fff)" stroke="${n.color}" stroke-width="${n.arcs ? 4 : 3}"/>
         ${n.arcs ? sourceArcs(n) : ""}
-        ${n.fill != null ? `<clipPath id="pvs-fill"><circle cx="${n.x}" cy="${n.y}" r="38.5"/></clipPath><rect x="${n.x - 40}" y="${(n.y + 40 - 0.8 * Math.min(Math.max(n.fill, 0), 100)).toFixed(1)}" width="80" height="${(0.8 * Math.min(Math.max(n.fill, 0), 100)).toFixed(1)}" fill="${n.color}" fill-opacity="0.3" clip-path="url(#pvs-fill)"/>` : ""}
+        ${n.fill != null ? `<clipPath id="pvs-fill"><circle cx="${n.x}" cy="${n.y}" r="38.5"/></clipPath><rect x="${n.x - 40}" y="${(n.y + 40 - 0.8 * Math.min(Math.max(n.fill, 0), 100)).toFixed(1)}" width="80" height="${(0.8 * Math.min(Math.max(n.fill, 0), 100)).toFixed(1)}" fill="${n.fillColor || n.color}" fill-opacity="0.3" clip-path="url(#pvs-fill)"/>` : ""}
         <foreignObject x="${n.x - 12}" y="${n.y - 32}" width="24" height="24"><ha-icon icon="${n.icon}" style="color:${n.color};--mdc-icon-size:22px"></ha-icon></foreignObject>
         <text x="${n.x}" y="${n.y + 8}" text-anchor="middle" class="strong" style="font-size:13px">${n.value || n.label}</text>
         <text x="${n.x}" y="${n.y + 23}" text-anchor="middle" style="font-size:${n.labelKey ? 12 : 10}px" ${n.labelKey ? `class="click strong" data-key="${n.labelKey}"` : ""}>${n.value ? n.label : ""}</text>
@@ -1339,6 +1385,87 @@ class PVSummaryPanel extends HTMLElement {
     return `<div class="card"><h3><ha-icon icon="mdi:home-battery"></ha-icon>${batteries.length > 1 ? TT("Akkus", "Batteries") : TT("Akku", "Battery")}${hint}</h3>
       <div class="batgrid">${batteries.map(block).join("")}</div>
       ${totals ? `<div class="mini" style="margin-top:12px">${totals}</div>` : ""}</div>`;
+  }
+
+  // Jahres-Heatmap: ein Kästchen je Tag (Spalten = Wochen ab Montag), Farbe nach Ertrag relativ zum besten Tag
+  _yearList(year) {
+    const raw = this._yearDays[`${this._id("total")}|${year}`];
+    return { raw, list: year === new Date().getFullYear() ? withToday(raw || [], this._num("today")) : raw || [] };
+  }
+
+  _renderYear() {
+    const cur = new Date().getFullYear();
+    const year = this._year ?? cur;
+    const { raw, list } = this._yearList(year);
+    const byDay = new Map(list.map((d) => [d.start.toDateString(), d.v]));
+    const present = list.filter((d) => d.v !== null && d.v !== undefined);
+    const nav = `<span class="navbtns">
+        <button class="navbtn" data-nav="year-prev" title="${TT("Vorjahr", "Previous year")}" ${raw && !raw.length && year < cur ? "disabled" : ""}>‹</button>
+        <button class="navbtn active" disabled>${year}</button>
+        <button class="navbtn" data-nav="year-next" title="${TT("Nächstes Jahr", "Next year")}" ${year >= cur ? "disabled" : ""}>›</button></span>`;
+    const head = `<h3><ha-icon icon="mdi:calendar-blank-multiple"></ha-icon>${TT("Produktion im Jahr", "Production by year")}<span class="hint">${TT("je Tag", "per day")}</span>${nav}</h3>`;
+    if (!present.length) return `<div class="card yearcard">${head}<div class="empty">${this._loading.year || !raw ? LOADING() : TT("Keine Daten vorhanden.", "No data available.")}</div></div>`;
+    const first = new Date(year, 0, 1);
+    const n = Math.round((new Date(year + 1, 0, 1) - first) / 864e5);
+    const off = (first.getDay() + 6) % 7;
+    const avail = this._chartWidth(1);
+    // Breit: Wochenraster (Spalten = Wochen, Zeilen = Mo bis So); schmal (Handy): Monatsraster (Zeilen = Monate, Spalten = Tag 1 bis 31)
+    const weeks = (avail - 30) / Math.ceil((off + n) / 7) - 2 >= 8;
+    const cols = weeks ? Math.ceil((off + n) / 7) : 31;
+    const L = weeks ? 28 : 30, T = weeks ? 16 : 14, R = 2, g = weeks ? 2 : 1.5;
+    const cs = Math.max(4, Math.min(20, (avail - L - R) / cols - g));
+    const ch = weeks ? cs : Math.max(cs, 12); // im Monatsraster etwas höhere Zeilen, damit die Monatsnamen passen
+    const W = L + cols * (cs + g) + R, H = T + (weeks ? 7 : 12) * (ch + g);
+    const best = Math.max(0, ...present.map((d) => d.v));
+    // Im dunklen Design wird die Skala umgedreht, damit viel Ertrag auch dort hell und auffällig ist
+    const steps = this._hass?.themes?.darkMode ? ["#27500a", "#3b6d11", "#639922", "#97c459", "#c0dd97"] : ["#c0dd97", "#97c459", "#639922", "#3b6d11", "#27500a"];
+    const color = (v) => v === undefined ? "var(--divider-color, rgba(0,0,0,.12))" : v < 0 ? "#e24b4a" : v === 0 || best <= 0 ? "var(--secondary-background-color, rgba(0,0,0,.06))" : steps[Math.min(4, Math.floor((v / best) * 5))];
+    let svg = "";
+    if (weeks) TT(["Mo", "Mi", "Fr"], ["Mon", "Wed", "Fri"]).forEach((w, i) => { svg += `<text x="0" y="${(T + i * 2 * (cs + g) + cs - 1).toFixed(1)}">${w}</text>`; });
+    else [1, 10, 20, 31].forEach((dd) => { svg += `<text x="${(L + (dd - 1) * (cs + g) + cs / 2).toFixed(1)}" y="10" text-anchor="middle">${dd}</text>`; });
+    let bestDone = false;
+    for (let i = 0; i < n; i++) {
+      const d = new Date(year, 0, 1 + i);
+      const k = off + i;
+      const xp = weeks ? L + Math.floor(k / 7) * (cs + g) : L + (d.getDate() - 1) * (cs + g);
+      const yp = weeks ? T + (k % 7) * (cs + g) : T + d.getMonth() * (ch + g);
+      const mon = d.toLocaleDateString(LOCALE(), { month: "short" }).replace(".", "");
+      if (d.getDate() === 1) svg += weeks ? `<text x="${xp.toFixed(1)}" y="11">${mon}</text>` : `<text x="0" y="${(yp + ch - 2).toFixed(1)}">${mon}</text>`;
+      const v = byDay.get(d.toDateString());
+      const isBest = !bestDone && v !== undefined && v === best && best > 0;
+      if (isBest) bestDone = true;
+      svg += `<rect data-hm="${d.getTime()}" x="${xp.toFixed(1)}" y="${yp.toFixed(1)}" width="${cs.toFixed(1)}" height="${ch.toFixed(1)}" rx="2" fill="${color(v)}"${isBest ? ` stroke="#ef9f27" stroke-width="1.6" data-best="1"` : ""}/>`;
+    }
+    const sum = year === cur && this._num("year") !== null ? this._num("year") : present.reduce((a, d) => a + d.v, 0);
+    const legend = `<span class="hmleg">${TT("weniger", "less")} ${steps.map((c) => `<i style="background:${c}"></i>`).join("")} ${TT("mehr", "more")}</span>
+      <span class="hmleg"><i style="outline:1.5px solid #ef9f27;outline-offset:-1.5px"></i> ${TT("bester Tag", "best day")}</span>
+      <span class="hmsum">${fmt(sum, 0)} kWh · Ø ${fmt(sum / present.length, 1)} kWh/${TT("Tag", "day")}</span>`;
+    return `<div class="card yearcard">${head}<div class="hm-wrap"><svg viewBox="0 0 ${W.toFixed(1)} ${H.toFixed(1)}" style="max-width:${Math.round(W)}px">${svg}</svg><div class="tip" style="display:none"></div></div><div class="hmfoot">${legend}</div></div>`;
+  }
+
+  _bindYear() {
+    const wrap = this._content.querySelector(".hm-wrap");
+    if (!wrap) return;
+    const tip = wrap.querySelector(".tip");
+    const { list } = this._yearList(this._year ?? new Date().getFullYear());
+    const byDay = new Map(list.map((d) => [d.start.toDateString(), d.v]));
+    const show = (ev) => {
+      const r = ev.target.closest("rect[data-hm]");
+      if (!r) { tip.style.display = "none"; return; }
+      const d = new Date(Number(r.dataset.hm)), v = byDay.get(d.toDateString());
+      tip.innerHTML = `<div class="time">${d.toLocaleDateString(LOCALE(), { weekday: "short", day: "numeric", month: "long", year: "numeric" })}</div>`
+        + `<div class="r">${TT("Produktion", "Production")}<b>${v === undefined ? "–" : `${fmt(v, 2)} kWh`}</b></div>`
+        + (r.dataset.best ? `<div class="r" style="color:#ef9f27">${TT("bester Tag", "best day")}</div>` : "");
+      tip.style.display = "block";
+      const wr = wrap.getBoundingClientRect(), rr = r.getBoundingClientRect();
+      const left = Math.max(0, Math.min(rr.left - wr.left + rr.width / 2 - tip.offsetWidth / 2, wr.width - tip.offsetWidth));
+      const top = rr.top - wr.top - tip.offsetHeight - 6;
+      tip.style.left = `${left}px`;
+      tip.style.top = `${top < 0 ? rr.bottom - wr.top + 6 : top}px`;
+    };
+    wrap.addEventListener("mousemove", show);
+    wrap.addEventListener("click", show);
+    wrap.addEventListener("mouseleave", () => { tip.style.display = "none"; });
   }
 
   _renderRecords() {
