@@ -11,9 +11,13 @@ CONF_HOUSE_POWER = "house_power_entity"  # optional: gemessener Hausverbrauch
 CONF_GRID_POWER = "grid_power_entity"  # optional: Netzleistung am Zähler, positiv = Bezug
 CONF_GRID_INVERT = "grid_invert"  # True: positive Werte bedeuten Einspeisung
 GRID_MIGRATED = "grid_migrated"  # v1.7: altes Hausverbrauch-Feld wurde ins Netz-Feld übernommen
+# Ersparnis (optional, nur mit Netz-Zähler): Preise je kWh und Anschaffungskosten in der Währung von Home Assistant
+CONF_PRICE_IMPORT = "price_import"  # Strompreis je kWh aus dem Netz
+CONF_PRICE_EXPORT = "price_export"  # Einspeisevergütung je kWh
+CONF_INVESTMENT = "investment"  # Anschaffungskosten der Anlage
 
 # Eigenes Dashboard (Panel in der Seitenleiste)
-VERSION = "1.14.1"
+VERSION = "1.15.0"
 # Eigene Adresse, damit sie nicht mit einem Lovelace-Dashboard "pv-summary" kollidiert
 PANEL_URL = "pv-summary-panel"
 STATIC_URL = "/pv_summary_static"

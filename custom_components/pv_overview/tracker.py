@@ -33,6 +33,8 @@ from .const import (
     CONF_GRID_POWER,
     CONF_HOUSE_POWER,
     CONF_INITIAL_TOTAL,
+    CONF_PRICE_EXPORT,
+    CONF_PRICE_IMPORT,
     CONF_SOURCE,
     CONF_STRING_CURRENT,
     CONF_STRING_POWER,
@@ -62,7 +64,9 @@ EXTRA_DAY_KEYS = (
     "house_day_kwh",
     "grid_import_day_kwh",
     "grid_export_day_kwh",
+    "savings_day",
 )
+SAVINGS_KEYS = ("savings_day", "savings_week", "savings_month", "savings_year", "savings_total")
 
 
 def _default_data(initial_total: float) -> dict[str, Any]:
@@ -98,6 +102,13 @@ def _default_data(initial_total: float) -> dict[str, Any]:
         "grid_import_total_kwh": 0.0,
         "grid_export_day_kwh": 0.0,
         "grid_export_total_kwh": 0.0,
+        # Ersparnis in der Währung von Home Assistant (None = noch nie berechnet)
+        "savings_day": 0.0,
+        "savings_week": 0.0,
+        "savings_month": 0.0,
+        "savings_year": 0.0,
+        "savings_total": None,
+        "savings_since": None,
         # Je Unter-Eintrag: subentry_id -> Zähler
         "batteries": {},
         "strings": {},
@@ -203,6 +214,14 @@ class PVTracker:
         # Zeitpunkt der letzten Integration von Haus und Netz (beide können berechnet sein)
         self._balance_last_time: datetime | None = None
 
+        # Ersparnis: nur mit Netz-Zähler (Einspeisung gemessen) und eingetragenem Strompreis
+        self.initial_total = float(entry.data.get(CONF_INITIAL_TOTAL, 0.0))
+        self.price_import: float | None = config.get(CONF_PRICE_IMPORT)
+        self.price_export: float = config.get(CONF_PRICE_EXPORT) or 0.0
+        self.savings_enabled = bool(self.grid_power_entity and self.price_import is not None)
+        self._savings_pv: float | None = None
+        self._savings_export: float | None = None
+
         self._store: Store[dict[str, Any]] = Store(
             hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}"
         )
@@ -241,6 +260,8 @@ class PVTracker:
             # Erster Start: der heutige Tag ist unvollständig und zählt nicht in Durchschnitte
             self.data["date"] = self.data["start_date"] = today
         self._check_rollover(dt_util.now())
+        if self.savings_enabled:
+            self._seed_savings(today)
 
         self._setters[self.source_entity] = self._set_power
         if self.grid_power_entity:
@@ -357,6 +378,7 @@ class PVTracker:
                     self.data[f"grid_{kind}_day_kwh"] += kwh
                     self.data[f"grid_{kind}_total_kwh"] += kwh
         self._balance_last_time = now
+        self._add_savings()
         self._check_rollover(dt_util.as_local(now))
 
     def _battery_setter(self, battery: Battery) -> Callable[[State | None, datetime], None]:
@@ -441,6 +463,7 @@ class PVTracker:
 
         if today.isocalendar()[:2] != current.isocalendar()[:2]:
             data["week_kwh"] = 0.0
+            data["savings_week"] = 0.0
         if (today.year, today.month) != (current.year, current.month):
             months: dict[str, float] = data["months"]
             month_kwh = round(data["month_kwh"], 3)
@@ -449,11 +472,56 @@ class PVTracker:
                 del months[old]
             data["last_month_kwh"] = month_kwh
             data["month_kwh"] = 0.0
+            data["savings_month"] = 0.0
         if today.year != current.year:
             data["year_kwh"] = 0.0
+            data["savings_year"] = 0.0
 
         data["date"] = today.isoformat()
         _LOGGER.debug("Tageswechsel %s -> %s, Tagesproduktion %.3f kWh", current, today, day_kwh)
+
+    # ------------------------------------------------------------------ Ersparnis
+
+    def _seed_savings(self, today: str) -> None:
+        """Beim ersten Einschalten die bisherige Ersparnis aus den vorhandenen Zählern schätzen.
+
+        Grundlage ist alles, was seit der Einrichtung erfasst wurde (ohne den Startwert des Gesamtzählers),
+        zum aktuellen Preis. Den Anteil der Einspeisung überträgt die Schätzung auf Tag, Woche, Monat und Jahr.
+        """
+        data = self.data
+        if data["savings_total"] is not None:
+            return
+        pv = max(data["total_kwh"] - self.initial_total, 0.0)
+        export = min(data["grid_export_total_kwh"], pv) if pv else 0.0
+        share = export / pv if pv else 0.0
+
+        def value(kwh: float) -> float:
+            return kwh * (1 - share) * self.price_import + kwh * share * self.price_export
+
+        data["savings_total"] = round(value(pv), 4)
+        data["savings_day"] = round(value(data["day_kwh"]), 4)
+        data["savings_week"] = round(value(data["week_kwh"]), 4)
+        data["savings_month"] = round(value(data["month_kwh"]), 4)
+        data["savings_year"] = round(value(data["year_kwh"]), 4)
+        data["savings_since"] = data["start_date"] or today
+        _LOGGER.debug("Ersparnis geschätzt: %.2f aus %.2f kWh (Einspeiseanteil %.0f %%)", data["savings_total"], pv, share * 100)
+
+    @callback
+    def _add_savings(self) -> None:
+        """Ersparnis seit dem letzten Aufruf aus den Zählerständen (PV gesamt, Einspeisung gesamt) addieren."""
+        if not self.savings_enabled or self.data["savings_total"] is None:
+            return
+        pv, export = self.data["total_kwh"], self.data["grid_export_total_kwh"]
+        if self._savings_pv is not None and self._savings_export is not None:
+            d_pv = max(pv - self._savings_pv, 0.0)
+            d_export = max(export - self._savings_export, 0.0)
+            # Eigenverbrauch = PV, die nicht eingespeist wurde (eingespeister Akkustrom zählt nicht als PV)
+            own = max(d_pv - d_export, 0.0)
+            gain = own * self.price_import + d_export * self.price_export
+            if gain:
+                for key in SAVINGS_KEYS:
+                    self.data[key] += gain
+        self._savings_pv, self._savings_export = pv, export
 
     # ------------------------------------------------------------------ Auswertungen
 

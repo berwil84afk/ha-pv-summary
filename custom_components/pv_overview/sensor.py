@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.sensor import (
@@ -222,6 +222,33 @@ GRID_ENERGY_SENSORS: tuple[PVSensorDescription, ...] = (
 )
 
 
+def _savings(key: str, data_key: str, **kwargs: Any) -> PVSensorDescription:
+    return PVSensorDescription(
+        key=key,
+        translation_key=key,
+        device_class=SensorDeviceClass.MONETARY,
+        suggested_display_precision=2,
+        icon="mdi:piggy-bank-outline",
+        value_fn=lambda t: round(t.data[data_key] or 0.0, 4),
+        **kwargs,
+    )
+
+
+# Nur mit Netz-Zähler und eingetragenem Strompreis; die Währung kommt aus den Einstellungen von Home Assistant
+SAVINGS_SENSORS: tuple[PVSensorDescription, ...] = (
+    _savings("savings_today", "savings_day"),
+    _savings("savings_week", "savings_week"),
+    _savings("savings_month", "savings_month"),
+    _savings("savings_year", "savings_year"),
+    _savings(
+        "savings_total",
+        "savings_total",
+        state_class=SensorStateClass.TOTAL,
+        attrs_fn=lambda t: {"since": t.data["savings_since"]},
+    ),
+)
+
+
 def _battery_sensors(battery: Battery) -> list[PVSensorDescription]:
     """Sensoren eines einzelnen Akkus (Leistung und Tagesenergie)."""
     sub = battery.sub_id
@@ -363,6 +390,9 @@ async def async_setup_entry(
         descriptions += HOUSE_SENSORS
     if tracker.grid_power_entity:
         descriptions += GRID_ENERGY_SENSORS
+    if tracker.savings_enabled:
+        currency = hass.config.currency
+        descriptions += [replace(desc, native_unit_of_measurement=currency) for desc in SAVINGS_SENSORS]
     async_add_entities(
         PVOverviewSensor(tracker, f"{entry.entry_id}_{desc.key}", main_device, desc) for desc in descriptions
     )

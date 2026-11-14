@@ -29,6 +29,9 @@ from .const import (
     CONF_GRID_POWER,
     CONF_HOUSE_POWER,
     CONF_INITIAL_TOTAL,
+    CONF_INVESTMENT,
+    CONF_PRICE_EXPORT,
+    CONF_PRICE_IMPORT,
     CONF_SOURCE,
     CONF_STRING_CURRENT,
     CONF_STRING_POWER,
@@ -48,6 +51,12 @@ THRESHOLD_SELECTOR = selector.NumberSelector(
         min=0, max=10_000, step=1, unit_of_measurement="W", mode=selector.NumberSelectorMode.BOX
     )
 )
+PRICE_SELECTOR = selector.NumberSelector(
+    selector.NumberSelectorConfig(min=0, max=10, step="any", mode=selector.NumberSelectorMode.BOX)
+)
+INVESTMENT_SELECTOR = selector.NumberSelector(
+    selector.NumberSelectorConfig(min=0, max=10_000_000, step=1, mode=selector.NumberSelectorMode.BOX)
+)
 CAPACITY_SELECTOR = selector.NumberSelector(
     selector.NumberSelectorConfig(
         min=0, max=1000, step=0.1, unit_of_measurement="kWh", mode=selector.NumberSelectorMode.BOX
@@ -58,6 +67,14 @@ CAPACITY_SELECTOR = selector.NumberSelector(
 def _optional(key: str, config: dict[str, Any]) -> vol.Optional:
     """Optionales Feld, das den bisherigen Wert vorschlägt, sich aber leeren lässt."""
     return vol.Optional(key, description={"suggested_value": config.get(key)})
+
+
+def _clean_numbers(data: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
+    """Leere Zahlenfelder als None speichern; 0 bleibt erhalten (z. B. keine Einspeisevergütung)."""
+    for key in keys:
+        value = data.get(key)
+        data[key] = None if value in (None, "") else float(value)
+    return data
 
 
 def _clean(user_input: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
@@ -121,7 +138,8 @@ class PVOverviewOptionsFlow(OptionsFlow):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
-            return self.async_create_entry(data=_clean(user_input, (CONF_GRID_POWER, CONF_HOUSE_POWER)))
+            data = _clean(user_input, (CONF_GRID_POWER, CONF_HOUSE_POWER))
+            return self.async_create_entry(data=_clean_numbers(data, (CONF_PRICE_IMPORT, CONF_PRICE_EXPORT, CONF_INVESTMENT)))
 
         config = {**self.config_entry.data, **self.config_entry.options}
         schema = vol.Schema(
@@ -133,6 +151,9 @@ class PVOverviewOptionsFlow(OptionsFlow):
                 vol.Required(
                     CONF_THRESHOLD, default=config.get(CONF_THRESHOLD, DEFAULT_THRESHOLD)
                 ): THRESHOLD_SELECTOR,
+                _optional(CONF_PRICE_IMPORT, config): PRICE_SELECTOR,
+                _optional(CONF_PRICE_EXPORT, config): PRICE_SELECTOR,
+                _optional(CONF_INVESTMENT, config): INVESTMENT_SELECTOR,
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)

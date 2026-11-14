@@ -15,6 +15,7 @@ from homeassistant.helpers import entity_registry as er
 
 from .const import (
     CONF_BATTERY_CAPACITY,
+    CONF_INVESTMENT,
     CONF_THRESHOLD,
     DEFAULT_THRESHOLD,
     DOMAIN,
@@ -104,6 +105,8 @@ def ws_get_config(
                 "entry_id": entry.entry_id,
                 "title": entry.title,
                 "threshold": config.get(CONF_THRESHOLD, DEFAULT_THRESHOLD),
+                "investment": config.get(CONF_INVESTMENT),
+                "currency": hass.config.currency,
                 "entities": entities,
                 "batteries": [s for s in subs.values() if s["type"] == SUBENTRY_BATTERY],
                 "strings": [s for s in subs.values() if s["type"] == SUBENTRY_STRING],
