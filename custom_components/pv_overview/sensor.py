@@ -244,7 +244,11 @@ SAVINGS_SENSORS: tuple[PVSensorDescription, ...] = (
         "savings_total",
         "savings_total",
         state_class=SensorStateClass.TOTAL,
-        attrs_fn=lambda t: {"since": t.data["savings_since"]},
+        attrs_fn=lambda t: {
+            "since": t.data["savings_since"],
+            # True, sobald die Produktion vor der Einrichtung geschätzt eingerechnet ist
+            "includes_initial_total": bool(t.data.get("savings_initial_done") and t.initial_total > 0),
+        },
     ),
 )
 

@@ -109,6 +109,7 @@ def _default_data(initial_total: float) -> dict[str, Any]:
         "savings_year": 0.0,
         "savings_total": None,
         "savings_since": None,
+        "savings_initial_done": False,  # Startwert des Gesamtzählers schon in die Ersparnis eingerechnet
         # Je Unter-Eintrag: subentry_id -> Zähler
         "batteries": {},
         "strings": {},
@@ -506,11 +507,32 @@ class PVTracker:
         data["savings_since"] = data["start_date"] or today
         _LOGGER.debug("Ersparnis geschätzt: %.2f aus %.2f kWh (Einspeiseanteil %.0f %%)", data["savings_total"], pv, share * 100)
 
+    def _add_initial_savings(self) -> None:
+        """Den Startwert des Gesamtzählers (Produktion vor der Einrichtung) einmalig in die Gesamtersparnis einrechnen.
+
+        Für diese kWh ist keine Einspeisung bekannt; sie werden mit dem Wert je kWh bewertet, den PV Summary
+        seit der Einrichtung gemessen hat. Gewartet wird, bis dafür mindestens 5 kWh erfasst sind.
+        """
+        data = self.data
+        if data.get("savings_initial_done") or data["savings_total"] is None:
+            return
+        if self.initial_total <= 0:
+            data["savings_initial_done"] = True
+            return
+        recorded = data["total_kwh"] - self.initial_total
+        if recorded < 5:
+            return
+        per_kwh = data["savings_total"] / recorded
+        data["savings_total"] += self.initial_total * per_kwh
+        data["savings_initial_done"] = True
+        _LOGGER.debug("Startwert %.1f kWh mit %.4f je kWh in die Ersparnis eingerechnet", self.initial_total, per_kwh)
+
     @callback
     def _add_savings(self) -> None:
         """Ersparnis seit dem letzten Aufruf aus den Zählerständen (PV gesamt, Einspeisung gesamt) addieren."""
         if not self.savings_enabled or self.data["savings_total"] is None:
             return
+        self._add_initial_savings()
         pv, export = self.data["total_kwh"], self.data["grid_export_total_kwh"]
         if self._savings_pv is not None and self._savings_export is not None:
             d_pv = max(pv - self._savings_pv, 0.0)
