@@ -1374,7 +1374,12 @@ class PVSummaryPanel extends HTMLElement {
     const dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
     // Balken = Anteil an dem, was bei Ø 30 Tage für den ganzen Zeitraum zu erwarten wäre
     // Ersparnis neben den kWh, wenn die Sensoren dazu existieren (Netz-Zähler und Strompreis eingetragen)
-    const eur = (key) => { const v = this._num(key); return v !== null ? `<span class="eurv">${this._money(v)}</span>` : ""; };
+    const eur = (key) => {
+      const v = this._num(key);
+      if (v === null) return "";
+      const est = key === "savings_total" && this._state(key)?.attributes?.includes_initial_total;
+      return `<span class="eurv"${est ? ` title="${TT("geschätzt, inklusive Startwert vor der Einrichtung", "estimated, including the production before the setup")}"` : ""}>${est ? "≈ " : ""}${this._money(v)}</span>`;
+    };
     const row = (key, label, expectedDays, color) => {
       const v = this._num(key);
       const expected = avg30 && expectedDays ? avg30 * expectedDays : null;
@@ -1401,10 +1406,13 @@ class PVSummaryPanel extends HTMLElement {
     let eta = "";
     if (pct >= 100) eta = TT("abbezahlt", "paid off");
     else {
+      // Jahresersparnis = Ø-Ertrag je Tag (365 Tage) × 365 × Wert je kWh; erst ab 30 Tagen Daten
       const since = this._state("savings_total")?.attributes?.since;
       const days = since ? (Date.now() - new Date(since).getTime()) / 864e5 : 0;
-      if (days >= 7 && total > 0) {
-        const left = ((invest - total) / (total / days)) * 864e5;
+      const kwh = this._num("total"), avg = this._num("avg_daily_365");
+      const perYear = kwh > 0 && avg > 0 ? avg * 365 * (total / kwh) : 0;
+      if (days >= 30 && perYear > 0) {
+        const left = ((invest - total) / perYear) * 365 * 864e5;
         eta = `${TT("voraussichtlich", "expected")} ${new Date(Date.now() + left).getFullYear()}`;
       }
     }
