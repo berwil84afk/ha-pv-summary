@@ -58,6 +58,7 @@ const STYLE = `
   .tip .dot { width:8px; height:8px; border-radius:50%; }
   .tip .rng { display:block; text-align:right; font-size:11px; color:var(--secondary-text-color); margin:-1px 0 2px; }
   .list { display:grid; gap:10px; font-size:14px; }
+  .eurv { color:var(--secondary-text-color); font-size:12px; margin-left:8px; }
   .hm-wrap { position:relative; }
   .hm-wrap svg { display:block; width:100%; margin:0 auto; }
   .hm-wrap rect { cursor:pointer; }
@@ -104,6 +105,7 @@ const STYLE = `
   .curve-wrap .zhint { position:absolute; left:50%; top:40%; transform:translate(-50%,-50%); pointer-events:none; background:rgba(0,0,0,.7); color:#fff; font-size:13px; padding:6px 12px; border-radius:8px; opacity:0; transition:opacity .2s; }
   .curve-wrap .zhint.show { opacity:1; }
   .lg { background:none; border:0; color:inherit; font:inherit; cursor:pointer; display:inline-flex; align-items:center; gap:4px; margin-left:10px; padding:0; }
+  .lg.fc { cursor:default; }
   .lg.off { opacity:.45; text-decoration:line-through; }
   .navbtns { display:inline-flex; gap:4px; align-items:center; }
   .navbtn { background:transparent; border:1px solid var(--divider-color, rgba(0,0,0,.12)); border-radius:999px; color:var(--secondary-text-color); font:inherit; font-size:12px; padding:2px 10px; cursor:pointer; }
@@ -171,6 +173,8 @@ class PVSummaryPanel extends HTMLElement {
     this._hidden = {};       // Diagramm -> Set der ausgeblendeten Reihen (nur bis zum nächsten Tag/Zoom)
     this._year = null;       // angezeigtes Jahr der Heatmap (null = aktuelles Jahr)
     this._yearDays = {};     // "Statistik-ID|Jahr" -> Tageswerte
+    this._forecast = null;   // Prognose für heute: [[Stundenbeginn ms, Wh], ...] oder null
+    this._forecastAt = 0;    // Zeitpunkt der letzten Abfrage
     this._loading = {};      // laufende Abfragen: curve, days, month, year
     this._historyDay = null; // Tag, zu dem this._history gehört
     this._ovl = null;        // offenes Overlay
@@ -420,6 +424,7 @@ class PVSummaryPanel extends HTMLElement {
     const jobs = [this._fetchCurveHistory(false)];
     if (this._prodMode === "month") jobs.push(this._fetchMonthDays(false));
     jobs.push(this._fetchYearDays(new Date().getFullYear(), false));
+    jobs.push(this._fetchForecast());
     if (total) {
       const dayStart = new Date(start); dayStart.setDate(dayStart.getDate() - 29);
       const monthStart = new Date(start.getFullYear(), start.getMonth() - 11, 1);
@@ -485,6 +490,26 @@ class PVSummaryPanel extends HTMLElement {
     }
     if (start === this._dayStart) this._loading.curve = false;
     if (render && entry === this._entry) this._render();
+  }
+
+  // Ertragsprognose (z. B. Forecast.Solar), so wie sie das Energie-Dashboard verwendet; höchstens alle 15 Minuten
+  async _fetchForecast() {
+    if (Date.now() - this._forecastAt < 15 * 60000) return;
+    this._forecastAt = Date.now();
+    try {
+      const res = await this._hass.callWS({ type: "energy/solar_forecast" });
+      const start = startOfDay(Date.now()), end = start + 24 * 3600000;
+      const hours = new Map();
+      for (const fc of Object.values(res || {})) {
+        for (const [iso, wh] of Object.entries(fc?.wh_hours || {})) {
+          const t = new Date(iso).getTime();
+          if (t >= start && t < end && Number.isFinite(wh)) hours.set(t, (hours.get(t) || 0) + wh);
+        }
+      }
+      this._forecast = hours.size ? [...hours].sort((a, b) => a[0] - b[0]) : null;
+    } catch (err) {
+      this._forecast = null; // keine Prognose eingerichtet oder Energie-Dashboard nicht aktiv
+    }
   }
 
   // Tageswerte eines Kalenderjahres für die Heatmap; vergangene Jahre ändern sich nicht mehr und werden nur einmal geladen
@@ -903,8 +928,10 @@ class PVSummaryPanel extends HTMLElement {
     const sixth = this._has("house_today")
       ? kpi("house_today", "mdi:home-lightning-bolt-outline", COLORS.house, TT("Haus heute", "House today"), fmt(this._num("house_today"), 2), "kWh", sub(TT("Verbrauch · 30 Tage ›", "Consumption · 30 days ›")), `data-open-ovl="house" title="${TT("Hausverbrauch der letzten 30 Tage", "House consumption, last 30 days")}"`)
       : kpi("week", "mdi:calendar-week", "#639922", TT("Diese Woche", "This week"), fmt(this._num("week"), 1), "kWh", sub(""));
+    const saved = this._num("savings_today");
+    const savedSub = saved !== null ? `<div class="sub">≈ ${this._money(saved)} ${TT("gespart", "saved")}</div>` : "";
     return `<div class="kpis">
-      ${kpi("today", "mdi:solar-power", COLORS.pv, TT("Heute", "Today"), fmt(today, 2), "kWh", delta || sub(""))}
+      ${kpi("today", "mdi:solar-power", COLORS.pv, TT("Heute", "Today"), fmt(today, 2), "kWh", (delta || (savedSub ? "" : sub(""))) + savedSub)}
       ${kpi("yesterday", "mdi:calendar-arrow-left", "#8a8a8a", TT("Gestern", "Yesterday"), fmt(this._num("yesterday"), 2), "kWh", sub(best ? TT("Bester Tag ", "Best day ") + fmt(this._num("best_day"), 1) + " kWh" : ""))}
       ${kpi("max_power_today", "mdi:flash", "#ef6c00", TT("Spitze heute", "Peak today"), fmtWValue(this._num("max_power_today")), fmtWUnit(this._num("max_power_today")), sub(max?.attributes?.time ? TT("um ", "at ") + fmtTime(max.attributes.time) : ""))}
       ${kpi("avg_power_today", "mdi:chart-bell-curve-cumulative", "#c9a000", TT("Ø Leistung", "Avg power"), fmtWValue(this._num("avg_power_today")), fmtWUnit(this._num("avg_power_today")), sub(TT("während der Produktion", "while producing")))}
@@ -990,9 +1017,14 @@ class PVSummaryPanel extends HTMLElement {
       for (let tt = arcA; tt < arcB; tt += stepMs) arcPts.push([tt, sinEl(tt)]);
       arcPts.push([arcB, sinEl(arcB)]);
     }
-    const arcTop = arcK > 0 ? arcK * Math.max(0, ...arcPts.map((q) => q[1])) : 0;
-    // Achse richtet sich nach dem höchsten Wert im sichtbaren Ausschnitt (samt Sonnenbogen)
-    const maxV = niceMax(Math.max(10, ...vals, arcTop)); // mindestens 10 W, damit sich die Beschriftung nicht wiederholt
+    // Prognose: Wh je Stunde = mittlere Leistung in W, gezeichnet zur Stundenmitte; ersetzt den Sonnenbogen
+    const fc = chartId === "main" && today && !hidden.has("power") && this._forecast?.length ? this._forecast : null;
+    if (fc) arcPts.length = 0;
+    const fcPts = fc ? [[fc[0][0], 0], ...fc.map(([h, wh]) => [h + 1800000, wh]), [fc[fc.length - 1][0] + 3600000, 0]] : [];
+    const fcTop = Math.max(0, ...fcPts.filter((q) => q[0] >= t0 - 3600000 && q[0] <= t1 + 3600000).map((q) => q[1]));
+    const arcTop = !fc && arcK > 0 ? arcK * Math.max(0, ...arcPts.map((q) => q[1])) : 0;
+    // Achse richtet sich nach dem höchsten Wert im sichtbaren Ausschnitt (samt Sonnenbogen bzw. Prognose)
+    const maxV = niceMax(Math.max(10, ...vals, arcTop, fcTop)); // mindestens 10 W, damit sich die Beschriftung nicht wiederholt
     const minV = Math.min(0, ...vals) < 0 ? -niceMax(-Math.min(...vals)) : 0;
     const x = (tt) => L + ((tt - t0) / (t1 - t0)) * (W - L - R);
     const tAt = (px) => t0 + ((px - L) / (W - L - R)) * (t1 - t0);
@@ -1075,17 +1107,20 @@ class PVSummaryPanel extends HTMLElement {
         : `<g fill="${s.color}" opacity="0.16">${band}</g>`;
       paths += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.fill ? 2 : 1.5}" stroke-linejoin="round" stroke-linecap="round"/>`;
       if (s.peak) {
-        // Spitze = höchstes 5-Minuten-Mittel im Ausschnitt
-        const peak = s.vis.filter((b) => mid(b) >= t0 && mid(b) <= t1).reduce((m, b) => (b[1] > m[1] ? b : m), [0, -Infinity]);
-        if (peak[1] > 0) paths += `<circle cx="${x(mid(peak))}" cy="${y(peak[1])}" r="4" fill="${s.color}" stroke="var(--card-background-color,#fff)" stroke-width="2"/><text x="${Math.min(x(mid(peak)) + 8, W - 60)}" y="${Math.max(y(peak[1]) - 6, 12)}" class="strong">${fmtW(peak[1])}</text>`;
+        // Spitze = höchster Einzelwert im Ausschnitt (wie die Kennzahl „Spitze heute“), Punkt an der Oberkante des Bandes
+        const peak = s.vis.filter((b) => mid(b) >= t0 && mid(b) <= t1).reduce((m, b) => (b[3] > m[3] ? b : m), [0, 0, 0, -Infinity]);
+        if (peak[3] > 0) paths += `<circle cx="${x(mid(peak))}" cy="${y(peak[3])}" r="4" fill="${s.color}" stroke="var(--card-background-color,#fff)" stroke-width="2"/><text x="${Math.min(x(mid(peak)) + 8, W - 60)}" y="${Math.max(y(peak[3]) - 6, 12)}" class="strong">${fmtW(peak[3])}</text>`;
       }
     }
+    if (fcPts.length) paths += `<path d="${fcPts.map((q, i) => `${i ? "L" : "M"}${x(q[0]).toFixed(1)},${y(q[1]).toFixed(1)}`).join(" ")}" fill="none" stroke="var(--secondary-text-color)" stroke-width="1.5" stroke-dasharray="5 4" stroke-linejoin="round" pointer-events="none"/>`;
     paths = `<clipPath id="clip-${chartId}"><rect x="${L}" y="0" width="${W - L - R}" height="${H}"/></clipPath><g clip-path="url(#clip-${chartId})">${paths}</g>`;
     this._curves[chartId] = { W, t0, t1, now, x, y, tAt, L, R, stacked, series, dayStart, mid, base };
     const sel = `<rect class="sel" x="0" y="${T}" width="0" height="${H - T - B}" fill="var(--primary-color, #03a9f4)" fill-opacity="0.15" style="display:none"/>`;
     const hover = `<g class="hover" style="display:none"><line class="hl" y1="${T}" y2="${H - B}" stroke="var(--primary-text-color)" stroke-opacity="0.4" stroke-width="1"/>${series.map((s) => `<circle r="4" fill="${s.color}" stroke="var(--card-background-color,#fff)" stroke-width="2"/>`).join("")}</g>`;
     // Legende: Klick blendet die Linie aus bzw. wieder ein
-    const legend = withData.map((s) => `<button class="lg ${hidden.has(s.key) ? "off" : ""}" data-chart="${chartId}" data-series="${escapeHtml(s.key)}" title="${hidden.has(s.key) ? TT("Einblenden", "Show") : TT("Ausblenden", "Hide")}"><span style="width:10px;height:10px;border-radius:2px;background:${s.color}"></span>${escapeHtml(s.label)}</button>`).join("");
+    const fcKwh = fc ? fc.reduce((a, q) => a + q[1], 0) / 1000 : null;
+    const fcLegend = fc ? `<span class="lg fc" title="${TT("Ertragsprognose aus dem Energie-Dashboard", "Production forecast from the energy dashboard")}"><span style="width:12px;border-top:2px dashed var(--secondary-text-color)"></span>${TT("Prognose", "Forecast")} ${fmt(fcKwh, 1)} kWh</span>` : "";
+    const legend = fcLegend + withData.map((s) => `<button class="lg ${hidden.has(s.key) ? "off" : ""}" data-chart="${chartId}" data-series="${escapeHtml(s.key)}" title="${hidden.has(s.key) ? TT("Einblenden", "Show") : TT("Ausblenden", "Hide")}"><span style="width:10px;height:10px;border-radius:2px;background:${s.color}"></span>${escapeHtml(s.label)}</button>`).join("");
     const dateText = new Date(dayStart).toLocaleDateString(LOCALE(), { day: "2-digit", month: "2-digit", year: "numeric" });
     const heading = (today ? `${title} ${TT("heute", "today")}` : `${title} ${TT("am", "on")} ${dateText}`)
       + `<span class="avg5" title="${TT("Jeder Punkt ist der Durchschnitt über 5 Minuten", "Each point is the average over 5 minutes")}">${TT("Ø je 5 Minuten", "5-min average")}</span>`;
@@ -1338,11 +1373,13 @@ class PVSummaryPanel extends HTMLElement {
     const now = new Date();
     const dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
     // Balken = Anteil an dem, was bei Ø 30 Tage für den ganzen Zeitraum zu erwarten wäre
+    // Ersparnis neben den kWh, wenn die Sensoren dazu existieren (Netz-Zähler und Strompreis eingetragen)
+    const eur = (key) => { const v = this._num(key); return v !== null ? `<span class="eurv">${this._money(v)}</span>` : ""; };
     const row = (key, label, expectedDays, color) => {
       const v = this._num(key);
       const expected = avg30 && expectedDays ? avg30 * expectedDays : null;
       const pct = expected ? Math.min(100, (v / expected) * 100) : 0;
-      return `<div class="item" data-key="${key}"><div class="line"><span>${label}</span><b>${fmt(v, v !== null && v >= 100 ? 0 : 1)} kWh</b></div>${expected ? `<div class="bar"><div style="width:${pct.toFixed(0)}%;background:${color}"></div></div>` : ""}</div>`;
+      return `<div class="item" data-key="${key}"><div class="line"><span>${label}</span><span><b>${fmt(v, v !== null && v >= 100 ? 0 : 1)} kWh</b>${eur(`savings_${key}`)}</span></div>${expected ? `<div class="bar"><div style="width:${pct.toFixed(0)}%;background:${color}"></div></div>` : ""}</div>`;
     };
     return `<div class="card"><h3><ha-icon icon="mdi:calendar-range"></ha-icon>${TT("Zeiträume", "Periods")}<span class="hint">${TT("Balken = Anteil an der Hochrechnung aus Ø 30 Tage", "Bar = share of the projection from the 30-day avg")}</span></h3>
       <div class="list">
@@ -1350,8 +1387,38 @@ class PVSummaryPanel extends HTMLElement {
         ${row("month", TT("Dieser Monat", "This month"), dim, "#639922")}
         ${row("year", TT("Dieses Jahr", "This year"), 365, "#3b6d11")}
         <div class="item line sep" data-key="last_month"><span class="muted">${TT("Letzter Monat", "Last month")}</span><b>${fmt(this._num("last_month"), 1)} kWh</b></div>
-        <div class="item line total" data-key="total"><span class="muted">${TT("Gesamt", "Total")}</span><b>${fmt(this._num("total"), 0)} kWh</b></div>
+        <div class="item line total" data-key="total"><span class="muted">${TT("Gesamt", "Total")}</span><span><b>${fmt(this._num("total"), 0)} kWh</b>${eur("savings_total")}</span></div>
+        ${this._renderPayback()}
       </div></div>`;
+  }
+
+  // Amortisation: Anteil der Anschaffungskosten, den die Ersparnis schon gedeckt hat, und das voraussichtliche Jahr
+  _renderPayback() {
+    const invest = Number(this._entry.investment) || 0;
+    const total = this._num("savings_total");
+    if (!invest || total === null) return "";
+    const pct = Math.max(0, (total / invest) * 100);
+    let eta = "";
+    if (pct >= 100) eta = TT("abbezahlt", "paid off");
+    else {
+      const since = this._state("savings_total")?.attributes?.since;
+      const days = since ? (Date.now() - new Date(since).getTime()) / 864e5 : 0;
+      if (days >= 7 && total > 0) {
+        const left = ((invest - total) / (total / days)) * 864e5;
+        eta = `${TT("voraussichtlich", "expected")} ${new Date(Date.now() + left).getFullYear()}`;
+      }
+    }
+    return `<div class="item" data-key="savings_total"><div class="line" style="font-size:12px"><span class="muted">${TT("Amortisation von", "Payback of")} ${this._money(invest, 0)}</span><span class="muted">${fmt(Math.min(pct, 999), 0)} %${eta ? ` · ${eta}` : ""}</span></div>
+      <div class="bar"><div style="width:${Math.min(100, pct).toFixed(1)}%;background:${COLORS.pv}"></div></div></div>`;
+  }
+
+  // Geldbetrag in der Währung von Home Assistant
+  _money(v, digits = 2) {
+    try {
+      return new Intl.NumberFormat(LOCALE(), { style: "currency", currency: this._entry?.currency || "EUR", minimumFractionDigits: digits, maximumFractionDigits: digits }).format(v);
+    } catch (err) {
+      return `${fmt(v, digits)} ${escapeHtml(this._entry?.currency || "")}`;
+    }
   }
 
   _renderBattery() {
