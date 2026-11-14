@@ -35,12 +35,18 @@
           "grid_power_entity": "Netzleistung (Zähler)",
           "grid_invert": "Vorzeichen Netz umkehren",
           "house_power_entity": "Hausverbrauch (optional)",
-          "threshold": "Schwelle für Produktionszeit"
+          "threshold": "Schwelle für Produktionszeit",
+          "price_import": "Strompreis je kWh (optional)",
+          "price_export": "Einspeisevergütung je kWh (optional)",
+          "investment": "Anschaffungskosten der Anlage (optional)"
         },
         "data_description": {
           "house_power_entity": "Nur angeben, wenn du einen Sensor hast, der wirklich den Verbrauch des Hauses misst. Sonst wird er aus PV, Akku und Netz berechnet.",
           "grid_power_entity": "Leistung am Netz-Zähler: positiv = Bezug, negativ = Einspeisung. Daraus wird der Hausverbrauch berechnet.",
-          "grid_invert": "Einschalten, wenn dein Zähler bei Einspeisung positive Werte meldet."
+          "grid_invert": "Einschalten, wenn dein Zähler bei Einspeisung positive Werte meldet.",
+          "price_import": "Was du für eine kWh aus dem Netz bezahlst, in der Währung von Home Assistant. Zusammen mit dem Netz-Zähler entstehen daraus die Sensoren zur Ersparnis.",
+          "price_export": "Was du für eine eingespeiste kWh bekommst. Leer oder 0, wenn du keine Vergütung bekommst.",
+          "investment": "Für die Amortisation im Dashboard: wie viel der Anlage durch die Ersparnis schon bezahlt ist."
         }
       }
     }
@@ -169,6 +175,21 @@
       },
       "grid_export_total": {
         "name": "Einspeisung gesamt"
+      },
+      "savings_today": {
+        "name": "Ersparnis heute"
+      },
+      "savings_week": {
+        "name": "Ersparnis diese Woche"
+      },
+      "savings_month": {
+        "name": "Ersparnis diesen Monat"
+      },
+      "savings_year": {
+        "name": "Ersparnis dieses Jahr"
+      },
+      "savings_total": {
+        "name": "Ersparnis gesamt"
       }
     }
   },

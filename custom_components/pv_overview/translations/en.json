@@ -35,12 +35,18 @@
           "grid_power_entity": "Grid power (meter)",
           "grid_invert": "Invert grid sign",
           "house_power_entity": "House consumption (optional)",
-          "threshold": "Production time threshold"
+          "threshold": "Production time threshold",
+          "price_import": "Electricity price per kWh (optional)",
+          "price_export": "Feed-in tariff per kWh (optional)",
+          "investment": "Cost of the system (optional)"
         },
         "data_description": {
           "house_power_entity": "Only if you have a sensor that really measures the house consumption. Otherwise it is calculated from PV, battery and grid.",
           "grid_power_entity": "Power at the grid meter: positive = import, negative = export. House consumption is calculated from it.",
-          "grid_invert": "Enable if your meter reports positive values while exporting."
+          "grid_invert": "Enable if your meter reports positive values while exporting.",
+          "price_import": "What you pay for one kWh from the grid, in the currency set in Home Assistant. Together with the grid meter this creates the savings sensors.",
+          "price_export": "What you get for one exported kWh. Leave empty or 0 if you get no feed-in tariff.",
+          "investment": "For the payback in the dashboard: how much of the system is already paid off by the savings."
         }
       }
     }
@@ -169,6 +175,21 @@
       },
       "grid_export_total": {
         "name": "Grid export total"
+      },
+      "savings_today": {
+        "name": "Savings today"
+      },
+      "savings_week": {
+        "name": "Savings this week"
+      },
+      "savings_month": {
+        "name": "Savings this month"
+      },
+      "savings_year": {
+        "name": "Savings this year"
+      },
+      "savings_total": {
+        "name": "Savings total"
       }
     }
   },
