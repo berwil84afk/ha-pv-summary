@@ -42,6 +42,7 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
         )
         websocket_api.async_register_command(hass, ws_get_config)
         websocket_api.async_register_command(hass, ws_save_layout)
+        websocket_api.async_register_command(hass, ws_save_cards)
         store["static_registered"] = True
     if store.get("panel_registered"):
         return
@@ -110,6 +111,7 @@ def ws_get_config(
                 "threshold": config.get(CONF_THRESHOLD, DEFAULT_THRESHOLD),
                 "investment": config.get(CONF_INVESTMENT),
                 "layout": getattr(entry, "runtime_data", None) and entry.runtime_data.data.get("layout"),
+                "cards": getattr(entry, "runtime_data", None) and entry.runtime_data.data.get("cards"),
                 "currency": hass.config.currency,
                 "entities": entities,
                 "batteries": [s for s in subs.values() if s["type"] == SUBENTRY_BATTERY],
@@ -117,6 +119,31 @@ def ws_get_config(
             }
         )
     connection.send_result(msg["id"], {"version": VERSION, "entries": entries})
+
+
+def _clean_ids(value: Any) -> list[str]:
+    """Liste von Karten-IDs: nur kurze Texte, ohne Doppelte, höchstens 50."""
+    ids: list[str] = []
+    for item in value if isinstance(value, list) else []:
+        if isinstance(item, str) and 0 < len(item) <= 40 and item not in ids:
+            ids.append(item)
+    return ids[:50]
+
+
+def _clean_cards(cards: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Kartenanordnung je Tab bereinigen; None setzt auf den Standard zurück."""
+    if not cards:
+        return None
+    result: dict[str, Any] = {}
+    for tab in ("overview", "strings"):
+        tab_cards = cards.get(tab)
+        if isinstance(tab_cards, dict):
+            result[tab] = {
+                "order": _clean_ids(tab_cards.get("order")),
+                "hidden": _clean_ids(tab_cards.get("hidden")),
+                "half": _clean_ids(tab_cards.get("half")),
+            }
+    return result or None
 
 
 def _clean_layout(layout: dict[str, Any]) -> dict[str, Any]:
@@ -154,3 +181,25 @@ def ws_save_layout(
     layout = _clean_layout(msg["layout"])
     entry.runtime_data.async_set_layout(layout)
     connection.send_result(msg["id"], {"layout": layout})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "pv_summary/cards",
+        vol.Required("entry_id"): str,
+        vol.Optional("cards"): vol.Any(dict, None),
+    }
+)
+@websocket_api.require_admin
+@callback
+def ws_save_cards(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Kartenanordnung des Dashboards einer Anlage speichern (ohne „cards“: Standardansicht)."""
+    entry = hass.config_entries.async_get_entry(msg["entry_id"])
+    if entry is None or entry.domain != DOMAIN or not hasattr(entry, "runtime_data"):
+        connection.send_error(msg["id"], "not_found", "PV Summary entry not found")
+        return
+    cards = _clean_cards(msg.get("cards"))
+    entry.runtime_data.async_set_cards(cards)
+    connection.send_result(msg["id"], {"cards": cards})

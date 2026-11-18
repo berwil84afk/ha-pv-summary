@@ -132,6 +132,7 @@ The integration brings its own dashboard. After setup it appears automatically a
   <img src="https://raw.githubusercontent.com/berwil84afk/ha-pv-summary/main/docs/modules.jpg" alt="Module view with glowing panel tiles and a time slider" width="640">
 
 - Clicking a value in the energy flow, the batteries or the strings opens the history of that sensor. With several systems you switch between them at the top right.
+- **Customize** (top right, administrators only): move the cards of the current tab by dragging the bar above them or with ↑ ↓, and hide cards with the eye. In the Strings tab, *Power per string*, *Yield per string* and *Modules* can also be set to half width, so two of them sit side by side. **Default view** resets the current tab, **Done** saves. The arrangement is saved in Home Assistant and applies to all devices; cards added in future versions appear at their default place.
 - Light and dark design follow your Home Assistant theme, and on a phone everything is stacked vertically.
 
 While data is loading, the charts show a loading hint. Today and the current month come from the live sensors in the bar charts, because the long-term statistics of Home Assistant are only updated every hour. The charts use the history and long-term statistics of Home Assistant, so the 30-day and 12-month bars and the yearly calendar fill up over time.

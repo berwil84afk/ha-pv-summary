@@ -132,6 +132,7 @@ Die Integration bringt ihr eigenes Dashboard mit. Es erscheint nach dem Einricht
   <img src="https://raw.githubusercontent.com/berwil84afk/ha-pv-summary/main/docs/modules.jpg" alt="Modulansicht mit leuchtenden Modulkacheln und Zeitschieber" width="640">
 
 - Ein Klick auf einen Wert im Energiefluss, bei den Akkus oder Strings öffnet den Verlauf des Sensors. Bei mehreren Anlagen schaltest du oben rechts zwischen ihnen um.
+- **Anpassen** (oben rechts, nur für Administratoren): Die Karten des aktuellen Tabs verschiebst du am Balken über der Karte oder mit ↑ ↓, mit dem Auge blendest du sie aus. Im Tab Strings lassen sich *Leistung je String*, *Ertrag je String* und *Module* zusätzlich auf halbe Breite stellen, dann stehen zwei davon nebeneinander. **Standardansicht** setzt den aktuellen Tab zurück, **Fertig** speichert. Die Anordnung wird in Home Assistant gespeichert und gilt auf allen Geräten; Karten aus künftigen Versionen erscheinen an ihrem Standardplatz.
 - Helles und dunkles Design folgen deinem Home-Assistant-Theme, auf dem Handy wird alles untereinander angezeigt.
 
 Solange Daten geladen werden, zeigen die Diagramme einen Ladehinweis. Der heutige Tag und der laufende Monat kommen in den Balken aus den Live-Sensoren, weil die Langzeitstatistik von Home Assistant nur stündlich aktualisiert wird. Die Diagramme nutzen den Verlauf und die Langzeitstatistik von Home Assistant. Die 30-Tage- und 12-Monats-Balken und der Jahreskalender füllen sich deshalb erst nach und nach.

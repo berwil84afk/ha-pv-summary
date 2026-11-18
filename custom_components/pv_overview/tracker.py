@@ -112,6 +112,8 @@ def _default_data(initial_total: float) -> dict[str, Any]:
         "savings_initial_done": False,  # Startwert des Gesamtzählers schon in die Ersparnis eingerechnet
         # Modulansicht: Anordnung der Kacheln und Helligkeits-Modus (vom Dashboard gespeichert)
         "layout": None,
+        # Kartenanordnung des Dashboards je Tab (Reihenfolge, ausgeblendet, halbe Breite)
+        "cards": None,
         # Je Unter-Eintrag: subentry_id -> Zähler
         "batteries": {},
         "strings": {},
@@ -295,6 +297,12 @@ class PVTracker:
     def async_set_layout(self, layout: dict[str, Any]) -> None:
         """Anordnung der Modulansicht übernehmen und bald speichern."""
         self.data["layout"] = layout
+        self._store.async_delay_save(lambda: self.data, 1)
+
+    @callback
+    def async_set_cards(self, cards: dict[str, Any] | None) -> None:
+        """Kartenanordnung des Dashboards übernehmen (None = Standard) und bald speichern."""
+        self.data["cards"] = cards
         self._store.async_delay_save(lambda: self.data, 1)
 
     async def async_stop(self) -> None:

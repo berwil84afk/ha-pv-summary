@@ -59,6 +59,16 @@ const STYLE = `
   .tip .dot { width:8px; height:8px; border-radius:50%; }
   .tip .rng { display:block; text-align:right; font-size:11px; color:var(--secondary-text-color); margin:-1px 0 2px; }
   .list { display:grid; gap:10px; font-size:14px; }
+  .cards { display:grid; gap:16px; grid-template-columns:repeat(12, minmax(0, 1fr)); }
+  .cslot { min-width:0; display:flex; flex-direction:column; }
+  .cslot > .card, .cslot > .kpis { flex:1; }
+  .cslot.edit { outline:1px dashed var(--divider-color, rgba(0,0,0,.3)); outline-offset:4px; border-radius:12px; }
+  .cslot.off > :not(.cbar) { opacity:.35; }
+  .cslot.dragover { outline:2px solid var(--primary-color, #03a9f4); }
+  .cbar { display:flex; align-items:center; gap:6px; margin-bottom:6px; font-size:12px; cursor:grab; color:var(--secondary-text-color); flex-wrap:wrap; }
+  .cbar .ct { flex:1; font-weight:500; color:var(--primary-text-color); }
+  .cbar .cgrip { font-size:16px; line-height:1; }
+  .head .cedit, .head > .chips > .navbtn { margin-left:4px; }
   .modroof-wrap { overflow:auto; max-height:600px; border-radius:8px; }
   .modroof { position:relative; min-width:520px; border-radius:8px; container-type:inline-size; background:repeating-linear-gradient(135deg, rgba(150,80,60,.10) 0 14px, rgba(150,80,60,.04) 14px 28px); }
   .modroof.edit { outline:1px dashed var(--divider-color, rgba(0,0,0,.25)); background-image:linear-gradient(var(--divider-color, rgba(0,0,0,.08)) 1px, transparent 1px), linear-gradient(90deg, var(--divider-color, rgba(0,0,0,.08)) 1px, transparent 1px);  }
@@ -164,7 +174,7 @@ const STYLE = `
   .ovl-foot { display:flex; justify-content:flex-end; margin-top:8px; }
   .oday .ohit { fill:transparent; }
   .oday.on .ohit { fill:var(--secondary-text-color); fill-opacity:.12; }
-  @media (max-width: 700px) { .row.wide-left, .row.half { grid-template-columns:1fr; } .content { padding:8px; gap:8px; } .row { gap:8px; } }
+  @media (max-width: 700px) { .cards { gap:8px; } .cslot { grid-column:1 / -1 !important; } .row.wide-left, .row.half { grid-template-columns:1fr; } .content { padding:8px; gap:8px; } .row { gap:8px; } }
 `;
 
 class PVSummaryPanel extends HTMLElement {
@@ -196,6 +206,9 @@ class PVSummaryPanel extends HTMLElement {
     this._modDraft = null;   // Anordnung während des Bearbeitens
     this._modDrag = null;    // gerade gezogene Kachel
     this._modTimer = null;   // Abspielen des Tages
+    this._cardEdit = false;  // Karten anpassen aktiv
+    this._cardDraft = null;  // Kartenanordnung während des Anpassens
+    this._cardDrag = null;   // gerade gezogene Karte
     this._forecastAt = 0;    // Zeitpunkt der letzten Abfrage
     this._loading = {};      // laufende Abfragen: curve, days, month, year
     this._historyDay = null; // Tag, zu dem this._history gehört
@@ -335,6 +348,8 @@ class PVSummaryPanel extends HTMLElement {
   }
 
   _onClick(ev) {
+    const cardBtn = ev.target.closest("[data-card]");
+    if (cardBtn) { this._onCardAction(cardBtn.dataset.card, cardBtn.dataset.id); return; }
     const view = ev.target.closest("[data-view]");
     if (view) {
       this._modStop();
@@ -793,28 +808,136 @@ class PVSummaryPanel extends HTMLElement {
     if (!this._entry || !this._content) return;
     if (this._pinch) { this._queueRender(); return; } // laufende Zwei-Finger-Geste nicht unterbrechen
     this._lastRender = Date.now();
-    const parts = [this._renderHead()];
-    if (this._view === "strings" && this._entry.strings?.length) {
-      parts.push(
-        this._curveCard("strings"),
-        this._renderStringTiles(),
-        `<div class="row wide-left">${this._renderStringDays()}${this._renderStringShare()}</div>`,
-        this._renderModules(),
-      );
-    } else {
-      parts.push(
-        `<div class="row half">${this._renderFlow()}${this._renderKpis()}</div>`,
-        this._curveCard("main"),
-        `<div class="row wide-left">${this._renderDays()}${this._renderPeriods()}</div>`,
-      );
-      if (this._entry.batteries?.length) parts.push(this._renderBattery());
-      parts.push(`<div class="row">${this._renderRecords()}${this._renderMonths()}</div>`);
-      if (this._id("total")) parts.push(this._renderYear());
-    }
+    const parts = [this._renderHead(), this._renderCards()];
     this._content.innerHTML = parts.join("");
+    this._bindCards();
     this._bindCurve();
     this._bindYear();
     this._bindModules();
+  }
+
+  // ---------------------------------------------------------------- Kartenraster (Reihenfolge, Ausblenden, Breite)
+
+  _cardTab() { return this._view === "strings" && this._entry.strings?.length ? "strings" : "overview"; }
+
+  // Karten je Tab mit Standardbreite (von 12 Spalten); „half“ = lässt sich auf halbe Breite stellen
+  _cardDefs(tab) {
+    if (tab === "strings") {
+      return [
+        { id: "scurve", span: 12, half: true, title: TT("Leistung je String", "Power per string"), html: () => this._curveCard("strings") },
+        { id: "stiles", span: 12, half: true, title: TT("Ertrag je String", "Yield per string"), html: () => this._renderStringTiles() },
+        { id: "sdays", span: 7, title: TT("Produktion je String, 30 Tage", "Production per string, 30 days"), html: () => this._renderStringDays() },
+        { id: "share", span: 5, title: TT("Anteil am Gesamtertrag", "Share of total yield"), html: () => this._renderStringShare() },
+        { id: "mods", span: 12, half: true, title: TT("Module", "Modules"), html: () => this._renderModules() },
+      ];
+    }
+    const defs = [
+      { id: "flow", span: 6, title: TT("Energiefluss jetzt", "Energy flow now"), html: () => this._renderFlow() },
+      { id: "kpis", span: 6, title: TT("Kennzahlen", "Key figures"), html: () => this._renderKpis() },
+      { id: "curve", span: 12, title: TT("Leistung heute", "Power today"), html: () => this._curveCard("main") },
+      { id: "days", span: 7, title: TT("Produktion der letzten 30 Tage", "Production, last 30 days"), html: () => this._renderDays() },
+      { id: "periods", span: 5, title: TT("Zeiträume", "Periods"), html: () => this._renderPeriods() },
+    ];
+    if (this._entry.batteries?.length) defs.push({ id: "battery", span: 12, title: TT("Akkus", "Batteries"), html: () => this._renderBattery() });
+    defs.push(
+      { id: "records", span: 6, title: TT("Durchschnitt und Rekorde", "Averages and records"), html: () => this._renderRecords() },
+      { id: "months", span: 6, title: TT("Produktion der letzten 12 Monate", "Production, last 12 months"), html: () => this._renderMonths() },
+    );
+    if (this._id("total")) defs.push({ id: "year", span: 12, title: TT("Produktion im Jahr", "Production by year"), html: () => this._renderYear() });
+    return defs;
+  }
+
+  _cardCfg(tab) { return (this._cardDraft || this._entry.cards || {})[tab] || {}; }
+
+  _cardHalf(tab, id) { return (this._cardCfg(tab).half || []).includes(id); }
+
+  // Gespeicherte Reihenfolge; Karten, die (noch) nicht darin stehen, kommen an ihren Standardplatz
+  _cardOrder(tab) {
+    const defs = this._cardDefs(tab), ids = defs.map((d) => d.id);
+    const order = (this._cardCfg(tab).order || []).filter((id) => ids.includes(id));
+    ids.forEach((id, i) => { if (!order.includes(id)) order.splice(Math.min(i, order.length), 0, id); });
+    return order.map((id) => defs.find((d) => d.id === id));
+  }
+
+  _renderCards() {
+    const tab = this._cardTab(), edit = this._cardEdit;
+    const hidden = new Set(this._cardCfg(tab).hidden || []);
+    const slots = this._cardOrder(tab).filter((d) => edit || !hidden.has(d.id)).map((d) => {
+      const html = d.html();
+      if (!html) return "";
+      const half = d.half && this._cardHalf(tab, d.id), span = half ? 6 : d.span, off = hidden.has(d.id);
+      const bar = edit ? `<div class="cbar" draggable="true" data-drag="${d.id}" title="${TT("Ziehen zum Verschieben", "Drag to move")}"><span class="cgrip">⠿</span><span class="ct">${escapeHtml(d.title)}</span>
+          ${d.half ? `<button class="navbtn" data-card="half" data-id="${d.id}">${half ? TT("halbe Breite", "half width") : TT("volle Breite", "full width")}</button>` : ""}
+          <button class="navbtn" data-card="up" data-id="${d.id}" title="${TT("Nach vorne", "Move up")}">↑</button>
+          <button class="navbtn" data-card="down" data-id="${d.id}" title="${TT("Nach hinten", "Move down")}">↓</button>
+          <button class="navbtn" data-card="eye" data-id="${d.id}" title="${off ? TT("Einblenden", "Show") : TT("Ausblenden", "Hide")}"><ha-icon icon="${off ? "mdi:eye-off-outline" : "mdi:eye-outline"}" style="--mdc-icon-size:15px"></ha-icon></button></div>` : "";
+      return `<div class="cslot${edit ? " edit" : ""}${off ? " off" : ""}" data-slot="${d.id}" style="grid-column:span ${span}">${bar}${html}</div>`;
+    });
+    return `<div class="cards">${slots.join("")}</div>`;
+  }
+
+  // Ziehen der Karten im Anpassen-Modus (am Balken über der Karte)
+  _bindCards() {
+    if (!this._cardEdit) return;
+    for (const bar of this._content.querySelectorAll(".cbar[data-drag]")) {
+      bar.addEventListener("dragstart", (ev) => { this._cardDrag = bar.dataset.drag; ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", this._cardDrag); });
+      bar.addEventListener("dragend", () => { this._cardDrag = null; });
+    }
+    for (const slot of this._content.querySelectorAll(".cslot")) {
+      slot.addEventListener("dragover", (ev) => { if (this._cardDrag) { ev.preventDefault(); slot.classList.add("dragover"); } });
+      slot.addEventListener("dragleave", () => slot.classList.remove("dragover"));
+      slot.addEventListener("drop", (ev) => {
+        ev.preventDefault();
+        const from = this._cardDrag, to = slot.dataset.slot;
+        this._cardDrag = null;
+        if (!from || from === to) { this._render(); return; }
+        const order = this._cardDraftTab().order, fi = order.indexOf(from);
+        order.splice(fi, 1);
+        const ti = order.indexOf(to);
+        order.splice(fi <= ti ? ti + 1 : ti, 0, from);
+        this._render();
+      });
+    }
+  }
+
+  // Bearbeitungsstand des aktuellen Tabs (mit vollständiger Reihenfolge)
+  _cardDraftTab() {
+    const tab = this._cardTab();
+    const cur = this._cardDraft[tab] || {};
+    this._cardDraft[tab] = { order: this._cardOrder(tab).map((d) => d.id), hidden: [...(cur.hidden || [])], half: [...(cur.half || [])] };
+    return this._cardDraft[tab];
+  }
+
+  _onCardAction(action, id) {
+    if (action === "edit") {
+      this._cardDraft = JSON.parse(JSON.stringify(this._entry.cards || {}));
+      this._cardEdit = true;
+      this._render();
+      return;
+    }
+    if (!this._cardDraft) return;
+    if (action === "cancel") {
+      this._cardDraft = null;
+      this._cardEdit = false;
+    } else if (action === "reset") {
+      if (!window.confirm(TT("Alle Karten dieses Tabs auf die Standardansicht zurücksetzen?", "Reset all cards of this tab to the default view?"))) return;
+      delete this._cardDraft[this._cardTab()];
+    } else if (action === "done") {
+      const entry = this._entry, cards = Object.keys(this._cardDraft).length ? this._cardDraft : null;
+      entry.cards = cards;
+      this._cardDraft = null;
+      this._cardEdit = false;
+      this._hass.callWS({ type: "pv_summary/cards", entry_id: entry.entry_id, ...(cards ? { cards } : {}) })
+        .then((res) => { entry.cards = res.cards; })
+        .catch((err) => console.warn("PV Summary: Kartenanordnung konnte nicht gespeichert werden", err));
+    } else {
+      const t = this._cardDraftTab(), i = t.order.indexOf(id);
+      if (action === "up" && i > 0) [t.order[i - 1], t.order[i]] = [t.order[i], t.order[i - 1]];
+      else if (action === "down" && i >= 0 && i < t.order.length - 1) [t.order[i + 1], t.order[i]] = [t.order[i], t.order[i + 1]];
+      else if (action === "eye") t.hidden = t.hidden.includes(id) ? t.hidden.filter((x) => x !== id) : [...t.hidden, id];
+      else if (action === "half") t.half = t.half.includes(id) ? t.half.filter((x) => x !== id) : [...t.half, id];
+    }
+    this._render();
   }
 
   _curveCard(chartId) {
@@ -891,7 +1014,10 @@ class PVSummaryPanel extends HTMLElement {
     const views = this._entry.strings?.length
       ? `<div class="views">${[["overview", TT("Übersicht", "Overview")], ["strings", "Strings"]].map(([v, label]) => `<button data-view="${v}" class="${this._view === v ? "active" : ""}">${label}</button>`).join("")}</div>`
       : "";
-    return `<div class="head"><ha-icon icon="mdi:solar-power-variant" style="color:${COLORS.pv};--mdc-icon-size:28px"></ha-icon><span class="name">${escapeHtml(this._entry.title)}</span>${views}<div class="chips">${chips.join("")}</div></div>`;
+    const edit = this._cardEdit
+      ? `<span class="navbtns cedit"><button class="navbtn" data-card="reset"><ha-icon icon="mdi:restore" style="--mdc-icon-size:15px"></ha-icon> ${TT("Standardansicht", "Default view")}</button><button class="navbtn" data-card="cancel">${TT("Abbrechen", "Cancel")}</button><button class="navbtn active" data-card="done">${TT("Fertig", "Done")}</button></span>`
+      : this._hass?.user?.is_admin ? `<button class="navbtn" data-card="edit" title="${TT("Karten anordnen und ausblenden", "Arrange and hide cards")}"><ha-icon icon="mdi:pencil-outline" style="--mdc-icon-size:15px"></ha-icon> ${TT("Anpassen", "Customize")}</button>` : "";
+    return `<div class="head"><ha-icon icon="mdi:solar-power-variant" style="color:${COLORS.pv};--mdc-icon-size:28px"></ha-icon><span class="name">${escapeHtml(this._entry.title)}</span>${views}<div class="chips">${chips.join("")}${edit}</div></div>`;
   }
 
   _renderFlow() {
@@ -1038,7 +1164,7 @@ class PVSummaryPanel extends HTMLElement {
     const mid = (b) => b[0] + (Math.min(b[0] + BIN_MS, now) - b[0]) / 2;
     const stackTimes = stacked ? [...new Set(series.flatMap((s) => s.vis.map((b) => b[0])))].sort((a, b) => a - b) : [];
 
-    const W = this._chartWidth(1), H = 220, L = 44, R = 8, T = 10, B = 24;
+    const W = this._chartWidth(chartId === "strings" && this._cardHalf("strings", "scurve") ? 0.5 : 1), H = 220, L = 44, R = 8, T = 10, B = 24;
     const vals = stacked
       ? stackTimes.map((tt) => series[series.length - 1].cumAt(tt))
       : series.flatMap((s) => s.vis.flatMap((b) => [b[2], b[3]]));
