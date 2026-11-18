@@ -59,6 +59,19 @@ const STYLE = `
   .tip .dot { width:8px; height:8px; border-radius:50%; }
   .tip .rng { display:block; text-align:right; font-size:11px; color:var(--secondary-text-color); margin:-1px 0 2px; }
   .list { display:grid; gap:10px; font-size:14px; }
+  .modroof-wrap { overflow:auto; max-height:600px; border-radius:8px; }
+  .modroof { position:relative; min-width:520px; border-radius:8px; container-type:inline-size; background:repeating-linear-gradient(135deg, rgba(150,80,60,.10) 0 14px, rgba(150,80,60,.04) 14px 28px); }
+  .modroof.edit { outline:1px dashed var(--divider-color, rgba(0,0,0,.25)); background-image:linear-gradient(var(--divider-color, rgba(0,0,0,.08)) 1px, transparent 1px), linear-gradient(90deg, var(--divider-color, rgba(0,0,0,.08)) 1px, transparent 1px);  }
+  .modtile { position:absolute; box-sizing:border-box; border-radius:6px; border:3px solid #1b2a44; padding:6px; display:flex; flex-direction:column; justify-content:flex-end; color:#fff; cursor:pointer; transition:background 1s ease, box-shadow 1s ease; user-select:none; overflow:hidden; }
+  .modroof.edit .modtile { cursor:grab; transition:none; touch-action:none; }
+  .modroof.edit .modtile.drag { cursor:grabbing; z-index:2; outline:2px solid var(--primary-color, #03a9f4); }
+  .modtile .mn { font-size:max(10px, 1.3cqw); text-shadow:0 1px 3px #000; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .modtile .mv { font-size:max(11px, 1.7cqw); font-weight:500; text-shadow:0 1px 3px #000; white-space:nowrap; }
+  .modtile .mrot { position:absolute; top:3px; right:5px; font-size:max(12px, 1.6cqw); cursor:pointer; text-shadow:0 1px 3px #000; }
+  .modbar { display:flex; align-items:center; gap:8px; margin-top:10px; font-size:12px; }
+  .modbar input[type=range] { flex:1; min-width:80px; accent-color:${SUN_COLOR}; }
+  .modbar .modtm { min-width:44px; text-align:right; font-weight:500; }
+  .modcard h3 .navbtns { flex-wrap:wrap; }
   .eurv { color:var(--secondary-text-color); font-size:12px; margin-left:8px; }
   .hm-wrap { position:relative; }
   .hm-wrap svg { display:block; width:100%; margin:0 auto; }
@@ -178,6 +191,11 @@ class PVSummaryPanel extends HTMLElement {
     this._year = null;       // angezeigtes Jahr der Heatmap (null = aktuelles Jahr)
     this._yearDays = {};     // "Statistik-ID|Jahr" -> Tageswerte
     this._forecast = null;   // Prognose für heute: [[Stundenbeginn ms, Wh], ...] oder null
+    this._modT = null;       // Modulansicht: gewählter Zeitpunkt (ms) oder null = live
+    this._modEdit = false;   // Modulansicht: Anordnen aktiv
+    this._modDraft = null;   // Anordnung während des Bearbeitens
+    this._modDrag = null;    // gerade gezogene Kachel
+    this._modTimer = null;   // Abspielen des Tages
     this._forecastAt = 0;    // Zeitpunkt der letzten Abfrage
     this._loading = {};      // laufende Abfragen: curve, days, month, year
     this._historyDay = null; // Tag, zu dem this._history gehört
@@ -310,7 +328,7 @@ class PVSummaryPanel extends HTMLElement {
 
   _queueRender() {
     if (this._renderQueued) return;
-    if (this._drag || this._pinch) { setTimeout(() => this._queueRender(), 500); return; }
+    if (this._drag || this._pinch || this._modDrag) { setTimeout(() => this._queueRender(), 500); return; }
     this._renderQueued = true;
     const wait = Math.max(0, LIVE_RENDER_MS - (Date.now() - this._lastRender));
     setTimeout(() => { this._renderQueued = false; this._render(); }, wait);
@@ -319,6 +337,7 @@ class PVSummaryPanel extends HTMLElement {
   _onClick(ev) {
     const view = ev.target.closest("[data-view]");
     if (view) {
+      this._modStop();
       this._view = view.dataset.view;
       this._hover = null;
       this._render();
@@ -337,6 +356,14 @@ class PVSummaryPanel extends HTMLElement {
       this._onNav(nav.dataset.nav);
       return;
     }
+    const rot = ev.target.closest("[data-modrot]");
+    if (rot && this._modDraft) {
+      const t = this._modDraft.tiles[rot.dataset.modrot];
+      if (t) t.rot = !t.rot;
+      this._render();
+      return;
+    }
+    if (this._modEdit && ev.target.closest("[data-mod]")) return;
     const ovl = ev.target.closest("[data-open-ovl]");
     if (ovl) {
       this._openOverlay(ovl.dataset.openOvl);
@@ -350,6 +377,8 @@ class PVSummaryPanel extends HTMLElement {
   }
 
   _onNav(action) {
+    if (action.startsWith("mod-")) { this._onModNav(action); return; }
+    if (action.startsWith("day-")) { this._modStop(); this._modT = null; }
     const today = startOfDay(Date.now());
     if (action === "day-prev" || action === "day-next") {
       const cur = this._day ?? today;
@@ -770,6 +799,7 @@ class PVSummaryPanel extends HTMLElement {
         this._curveCard("strings"),
         this._renderStringTiles(),
         `<div class="row wide-left">${this._renderStringDays()}${this._renderStringShare()}</div>`,
+        this._renderModules(),
       );
     } else {
       parts.push(
@@ -784,6 +814,7 @@ class PVSummaryPanel extends HTMLElement {
     this._content.innerHTML = parts.join("");
     this._bindCurve();
     this._bindYear();
+    this._bindModules();
   }
 
   _curveCard(chartId) {
@@ -1156,7 +1187,7 @@ class PVSummaryPanel extends HTMLElement {
         <button class="navbtn ${today ? "active" : ""}" data-nav="day-today">${TT("Heute", "Today")}</button>
         <button class="navbtn" data-nav="day-next" title="${TT("Nächster Tag", "Next day")}" ${today ? "disabled" : ""}>›</button></span>`;
     const empty = this._loading.curve ? LOADING() : today ? TT("Noch keine Verlaufsdaten für heute.", "No history for today yet.") : TT("Keine Daten vorhanden.", "No data available.");
-    const body = !series.length && withData.length ? `<div class="empty">${TT("Alle Linien ausgeblendet.", "All lines hidden.")}</div>` : series.length ? `<div class="curve-wrap" data-chart="${chartId}"><svg viewBox="0 0 ${W} ${H}">${grid}${paths}${sel}${hover}</svg><div class="tip" style="display:none"></div></div>` : `<div class="empty">${empty}</div>`;
+    const body = !series.length && withData.length ? `<div class="empty">${TT("Alle Linien ausgeblendet.", "All lines hidden.")}</div>` : series.length ? `<div class="curve-wrap" data-chart="${chartId}"><svg viewBox="0 0 ${W} ${H}">${grid}${paths}${sel}${chartId === "strings" ? `<line class="modt" y1="${T}" y2="${H - B}" stroke="${SUN_COLOR}" stroke-width="1.5" style="display:none" pointer-events="none"/>` : ""}${hover}</svg><div class="tip" style="display:none"></div></div>` : `<div class="empty">${empty}</div>`;
     return `<div class="card"><h3><ha-icon icon="${icon}"></ha-icon>${heading}<span class="hint">${legend}</span>${modes}${nav}</h3>${body}</div>`;
   }
 
@@ -1564,6 +1595,235 @@ class PVSummaryPanel extends HTMLElement {
     wrap.addEventListener("mousemove", show);
     wrap.addEventListener("click", show);
     wrap.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+  }
+
+  // ---------------------------------------------------------------- Modulansicht (Tab Strings)
+
+  _modLayout() { return this._modDraft || this._entry.layout || { mode: "max", tiles: {} }; }
+
+  // Eine Kachel je Modul: ein String mit n Modulen ergibt n Kacheln mit je 1/n der Leistung
+  _modTiles() {
+    const tiles = [];
+    (this._entry.strings || []).forEach((s) => {
+      const n = Math.max(1, Number(s.modules) || 1);
+      for (let k = 0; k < n; k++) tiles.push({ key: `${s.id}#${k}`, s, n, name: n > 1 ? `${s.title} ${k + 1}` : s.title });
+    });
+    return tiles;
+  }
+
+  // Kachelgröße in Breiten der Fläche (Hochformat 4:5), bei vielen Modulen kleiner
+  _modSize(count) {
+    const w = count <= 10 ? 0.1 : Math.max(0.05, 0.1 * Math.sqrt(10 / count));
+    return { w, h: w * 1.25 };
+  }
+
+  // Höhe der Fläche in Breiten: bis zur untersten Kachel plus Rand, mindestens eine Reihe; beim Anordnen eine Reihe mehr
+  _modHeight(pos, size) {
+    const bottom = Math.max(0, ...pos.map((p) => p.y + (p.rot ? size.w : size.h)));
+    return Math.max(size.h + 0.06, bottom + 0.03) + (this._modEdit ? size.h + 0.03 : 0);
+  }
+
+  // Gespeicherte Position oder eine freie Reihe von links oben
+  _modPositions(tiles) {
+    const lay = this._modLayout(), { w, h } = this._modSize(tiles.length);
+    const perRow = Math.max(1, Math.floor(0.92 / (w + 0.015)));
+    let free = 0;
+    return tiles.map((t) => {
+      const saved = lay.tiles?.[t.key];
+      if (saved) return { ...saved };
+      const i = free++;
+      return { x: 0.04 + (i % perRow) * (w + 0.015), y: 0.03 + Math.floor(i / perRow) * (h + 0.03), rot: false };
+    });
+  }
+
+  // Zeitraum des Schiebers: Sonnenauf- bis -untergang des angezeigten Tages (heute höchstens bis jetzt)
+  _modRange() {
+    const dayStart = this._dayStart, sun = this._sunTimes(dayStart);
+    const step = 5 * 60000;
+    let a = sun ? Math.floor(sun[0] / step) * step : dayStart + 5 * 3600000;
+    let b = sun ? Math.ceil(sun[1] / step) * step : dayStart + 21 * 3600000;
+    if (this._isToday) b = Math.min(b, Math.floor(Date.now() / step) * step);
+    if (b < a) b = a;
+    return [a, b];
+  }
+
+  // 5-Minuten-Werte je String für den angezeigten Tag (aus dem schon geladenen Verlauf)
+  _modBins() {
+    const dayStart = this._dayStart;
+    if (this._modCache?.h === this._history && this._modCache.day === dayStart) return this._modCache.bins;
+    const end = this._isToday ? Date.now() : dayStart + 864e5;
+    const bins = {};
+    for (const st of this._entry.strings || []) {
+      const id = this._id(`${st.id}|string_power`);
+      const pts = id ? (this._history[id] || []).slice().sort((a, b) => a[0] - b[0]) : [];
+      bins[st.id] = pts.length ? binSeries(pts, dayStart, end) : [];
+    }
+    this._modCache = { h: this._history, day: dayStart, bins };
+    return bins;
+  }
+
+  // Leistung je String zum gewählten Zeitpunkt (live: aktuelle Sensoren) und Tageshöchstwert je String
+  _modValues() {
+    const bins = this._modBins(), t = this._modT, live = t === null && this._isToday;
+    const pow = {}, peak = {};
+    for (const st of this._entry.strings || []) {
+      const b = bins[st.id] || [];
+      peak[st.id] = Math.max(0, ...b.map((x) => x[1] ?? 0));
+      pow[st.id] = Math.max(0, (live ? this._num(`${st.id}|string_power`) : binAt(b, t ?? 0)?.[1]) ?? 0);
+    }
+    return { pow, peak, live };
+  }
+
+  _renderModules() {
+    if (!this._entry.strings?.length) return "";
+    const tiles = this._modTiles(), lay = this._modLayout(), edit = this._modEdit;
+    const pos = this._modPositions(tiles), size = this._modSize(tiles.length), { w, h } = size;
+    const H = this._modHeight(pos, size);
+    const [a, b] = this._modRange();
+    // Vergangener Tag ohne gewählte Uhrzeit: Zeitpunkt mit der höchsten Gesamtleistung
+    if (!this._isToday && this._modT === null) {
+      const bins = this._modBins();
+      let best = a, bestV = -1;
+      for (let tt = a; tt <= b; tt += 5 * 60000) {
+        const v = Object.values(bins).reduce((s2, bb) => s2 + (binAt(bb, tt)?.[1] ?? 0), 0);
+        if (v > bestV) { bestV = v; best = tt; }
+      }
+      // Erst setzen, wenn der Verlauf des Tages geladen ist
+      if (bestV > 0) this._modT = best;
+    }
+    const admin = !!this._hass?.user?.is_admin;
+    const btns = edit
+      ? `<span class="navbtns">
+          <button class="navbtn ${lay.mode !== "own" ? "active" : ""}" data-nav="mod-mode-max" title="${TT("Hellstes Modul = 100 %", "Brightest module = 100 %")}">${TT("rel. zum stärksten", "rel. to strongest")}</button>
+          <button class="navbtn ${lay.mode === "own" ? "active" : ""}" data-nav="mod-mode-own" title="${TT("Jeder String zu seinem Tageshöchstwert", "Each string to its peak of the day")}">${TT("je String eigenes Max.", "own peak per string")}</button>
+          <button class="navbtn" data-nav="mod-cancel">${TT("Abbrechen", "Cancel")}</button>
+          <button class="navbtn active" data-nav="mod-done">${TT("Fertig", "Done")}</button></span>`
+      : `<span class="navbtns">${this._isToday ? `<button class="navbtn modlive" data-nav="mod-live"${this._modT === null ? ' style="display:none"' : ""}>${TT("Jetzt", "Now")}</button>` : ""}${admin ? `<button class="navbtn" data-nav="mod-edit">${TT("Anordnen", "Arrange")}</button>` : ""}</span>`;
+    const roof = tiles.map((t, i) => {
+      const p = pos[i], tw = p.rot ? h : w, th = p.rot ? w : h;
+      return `<div class="modtile" data-mod="${t.key}" data-key="${t.s.id}|string_power" style="left:${(p.x * 100).toFixed(2)}%;top:${((p.y / H) * 100).toFixed(2)}%;width:${(tw * 100).toFixed(2)}%;height:${((th / H) * 100).toFixed(2)}%">`
+        + `${edit ? `<span class="mrot" data-modrot="${t.key}" title="${TT("Drehen", "Rotate")}">↻</span>` : ""}<span class="mn">${escapeHtml(t.name)}</span><span class="mv"></span></div>`;
+    }).join("");
+    const playing = !!this._modTimer;
+    const time = (ms) => fmtTime(ms);
+    return `<div class="card modcard"><h3><ha-icon icon="mdi:solar-panel"></ha-icon>${TT("Module", "Modules")}<span class="hint modmode"></span>${btns}</h3>
+      <div class="modroof-wrap"><div class="modroof${edit ? " edit" : ""}" data-h="${H.toFixed(4)}" style="aspect-ratio:1 / ${H.toFixed(4)}${edit ? `;background-size:5% ${(5 / H).toFixed(3)}%` : ""}">${roof}</div></div>
+      <div class="modbar"><button class="navbtn" data-nav="mod-play" title="${TT("Tag abspielen", "Play the day")}">${playing ? "❚❚" : "▶"}</button>
+        <span class="muted">${time(a)}</span><input type="range" class="modsl" min="${a}" max="${b}" step="${5 * 60000}" value="${this._modT ?? b}"><span class="muted">${time(b)}</span><b class="modtm"></b></div>
+      <div class="muted modsum" style="font-size:12px"></div></div>`;
+  }
+
+  // Helligkeit, Werte, Uhrzeit und Markierung in der Kurve aktualisieren, ohne die Karte neu aufzubauen
+  _updateModules() {
+    const card = this._content?.querySelector(".modcard");
+    if (!card) return;
+    const tiles = this._modTiles(), lay = this._modLayout();
+    const { pow, peak, live } = this._modValues();
+    const vals = tiles.map((t) => (pow[t.s.id] || 0) / t.n);
+    const ref = Math.max(50, ...vals);
+    tiles.forEach((t, i) => {
+      const el = card.querySelector(`[data-mod="${t.key}"]`);
+      if (!el) return;
+      const p = Math.max(0, Math.min(1, lay.mode === "own" ? (pow[t.s.id] || 0) / Math.max(50, peak[t.s.id] || 0) : vals[i] / ref));
+      const l = 10 + p * 45;
+      el.style.background = `repeating-linear-gradient(90deg, transparent 0 calc(33.33% - 1px), rgba(255,255,255,.3) calc(33.33% - 1px) 33.33%), repeating-linear-gradient(0deg, transparent 0 calc(16.66% - 1px), rgba(255,255,255,.3) calc(16.66% - 1px) 16.66%), linear-gradient(160deg, hsl(210,75%,${(l + 15).toFixed(1)}%) 0%, hsl(218,78%,${l.toFixed(1)}%) 60%, hsl(225,80%,${(l * 0.6).toFixed(1)}%) 100%)`;
+      el.style.boxShadow = `0 0 ${(p * 30).toFixed(1)}px ${(p * 8).toFixed(1)}px rgba(255,200,40,${(p * 0.8).toFixed(2)})`;
+      el.querySelector(".mv").textContent = fmtW(vals[i]);
+    });
+    const total = Object.values(pow).reduce((x, y) => x + y, 0);
+    card.querySelector(".modtm").textContent = live ? TT("live", "live") : this._modT !== null ? fmtTime(this._modT) : "";
+    const sl = card.querySelector(".modsl");
+    if (sl && this._modT !== null) sl.value = this._modT;
+    const liveBtn = card.querySelector(".modlive");
+    if (liveBtn) liveBtn.style.display = live ? "none" : "";
+    card.querySelector(".modmode").textContent = lay.mode === "own" ? TT("Helligkeit je String zum Tageshöchstwert", "Brightness per string to its peak") : TT("Helligkeit relativ zum stärksten Modul", "Brightness relative to the strongest module");
+    card.querySelector(".modsum").textContent = `${TT("Summe", "Total")} ${fmtW(total)} · ${(this._entry.strings || []).length} ${TT("Strings", "strings")}, ${tiles.length} ${TT("Module", "modules")}`;
+    // Senkrechte Linie in „Leistung je String“
+    const line = this._content.querySelector('.curve-wrap[data-chart="strings"] .modt'), c = this._curves.strings;
+    if (line && c) {
+      const on = this._modT !== null && this._modT >= c.t0 && this._modT <= c.t1;
+      line.style.display = on ? "" : "none";
+      if (on) { const xv = c.x(this._modT).toFixed(1); line.setAttribute("x1", xv); line.setAttribute("x2", xv); }
+    }
+  }
+
+  _bindModules() {
+    const card = this._content.querySelector(".modcard");
+    if (!card) return;
+    this._updateModules();
+    const sl = card.querySelector(".modsl");
+    sl?.addEventListener("input", () => { this._modStop(); this._modT = Number(sl.value); this._updateModules(); });
+    const roof = card.querySelector(".modroof");
+    if (!this._modEdit || !roof) return;
+    // Ziehen: Position relativ zur Fläche, eingerastet auf 1 %
+    roof.addEventListener("pointerdown", (ev) => {
+      const el = ev.target.closest("[data-mod]");
+      if (!el || ev.target.closest("[data-modrot]")) return;
+      const r = roof.getBoundingClientRect(), er = el.getBoundingClientRect();
+      this._modDrag = { el, key: el.dataset.mod, dx: ev.clientX - er.left, dy: ev.clientY - er.top, r };
+      el.setPointerCapture(ev.pointerId);
+      el.classList.add("drag");
+      ev.preventDefault();
+    });
+    roof.addEventListener("pointermove", (ev) => {
+      const d = this._modDrag;
+      if (!d) return;
+      const snap = (v) => Math.round(v * 100) / 100;
+      const H = Number(roof.dataset.h);
+      const x = snap(Math.min(Math.max((ev.clientX - d.dx - d.r.left) / d.r.width, 0), 1 - d.el.offsetWidth / d.r.width));
+      const y = snap(Math.min(Math.max((ev.clientY - d.dy - d.r.top) / d.r.width, 0), H - d.el.offsetHeight / d.r.width));
+      d.el.style.left = `${(x * 100).toFixed(2)}%`;
+      d.el.style.top = `${((y / H) * 100).toFixed(2)}%`;
+      const t = this._modDraft.tiles[d.key];
+      t.x = x; t.y = y;
+    });
+    const end = () => { if (this._modDrag) { this._modDrag = null; this._render(); } };
+    roof.addEventListener("pointerup", end);
+    roof.addEventListener("pointercancel", end);
+  }
+
+  _modStop() {
+    if (this._modTimer) { clearInterval(this._modTimer); this._modTimer = null; }
+  }
+
+  _onModNav(action) {
+    if (action === "mod-play") {
+      if (this._modTimer) { this._modStop(); this._render(); return; }
+      const [a, b] = this._modRange();
+      if (this._modT === null || this._modT >= b) this._modT = a;
+      this._modTimer = setInterval(() => {
+        const [, end] = this._modRange();
+        this._modT = Math.min(end, this._modT + 5 * 60000);
+        if (this._modT >= end) { this._modStop(); this._render(); return; }
+        this._updateModules();
+      }, 80);
+      this._render();
+    } else if (action === "mod-live") {
+      this._modStop();
+      this._modT = null;
+      this._render();
+    } else if (action === "mod-edit") {
+      const tiles = this._modTiles(), pos = this._modPositions(tiles), lay = this._entry.layout || {};
+      this._modDraft = { mode: lay.mode === "own" ? "own" : "max", tiles: Object.fromEntries(tiles.map((t, i) => [t.key, { ...pos[i] }])) };
+      this._modEdit = true;
+      this._render();
+    } else if (action === "mod-mode-max" || action === "mod-mode-own") {
+      if (this._modDraft) this._modDraft.mode = action === "mod-mode-own" ? "own" : "max";
+      this._render();
+    } else if (action === "mod-cancel") {
+      this._modDraft = null;
+      this._modEdit = false;
+      this._render();
+    } else if (action === "mod-done") {
+      const layout = this._modDraft, entry = this._entry;
+      this._modDraft = null;
+      this._modEdit = false;
+      entry.layout = layout;
+      this._render();
+      this._hass.callWS({ type: "pv_summary/layout", entry_id: entry.entry_id, layout })
+        .then((res) => { entry.layout = res.layout; })
+        .catch((err) => console.warn("PV Summary: Anordnung konnte nicht gespeichert werden", err));
+    }
   }
 
   _renderRecords() {

@@ -34,6 +34,7 @@ from .const import (
     CONF_PRICE_IMPORT,
     CONF_SOURCE,
     CONF_STRING_CURRENT,
+    CONF_STRING_MODULES,
     CONF_STRING_POWER,
     CONF_STRING_VOLTAGE,
     CONF_THRESHOLD,
@@ -56,6 +57,9 @@ PRICE_SELECTOR = selector.NumberSelector(
 )
 INVESTMENT_SELECTOR = selector.NumberSelector(
     selector.NumberSelectorConfig(min=0, max=10_000_000, step=1, mode=selector.NumberSelectorMode.BOX)
+)
+MODULES_SELECTOR = selector.NumberSelector(
+    selector.NumberSelectorConfig(min=1, max=200, step=1, mode=selector.NumberSelectorMode.BOX)
 )
 CAPACITY_SELECTOR = selector.NumberSelector(
     selector.NumberSelectorConfig(
@@ -229,5 +233,11 @@ class StringSubentryFlow(_BaseSubentryFlow):
                 vol.Required(CONF_STRING_POWER, description={"suggested_value": config.get(CONF_STRING_POWER)}): SOURCE_SELECTOR,
                 _optional(CONF_STRING_VOLTAGE, config): SOURCE_SELECTOR,
                 _optional(CONF_STRING_CURRENT, config): SOURCE_SELECTOR,
+                vol.Required(CONF_STRING_MODULES, default=int(config.get(CONF_STRING_MODULES) or 1)): MODULES_SELECTOR,
             }
         )
+
+    def _data(self, user_input: dict[str, Any]) -> dict[str, Any]:
+        data = super()._data(user_input)
+        data[CONF_STRING_MODULES] = max(1, int(user_input.get(CONF_STRING_MODULES) or 1))
+        return data

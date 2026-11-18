@@ -74,7 +74,7 @@ Under **Configure** you can enter the **electricity price per kWh**, the **feed-
 
 ## Strings (optional)
 
-Via **Add string** you enter individual PV strings: power (required), voltage and current (optional). Each string gets its own device with *Power*, *Production today*, *Production total* and, if configured, *Voltage* and *Current*. As soon as at least one string exists, the dashboard has an additional **Strings** tab.
+Via **Add string** you enter individual PV strings: power (required), voltage and current (optional), and the number of modules of the string (default 1) for the module view. Each string gets its own device with *Power*, *Production today*, *Production total* and, if configured, *Voltage* and *Current*. As soon as at least one string exists, the dashboard has an additional **Strings** tab.
 
 ## Sensors
 
@@ -126,6 +126,10 @@ The integration brings its own dashboard. After setup it appears automatically a
 - **Strings** tab: power per string over the day, also smoothed to 5 minutes and with the sun arc, either as **Stacked** (default; the areas add up to the total PV power, and the tooltip shows the total) or **Lines** (with band), with day browsing and zoom. The browser remembers your choice. Plus production per string (current power shown large, today, yesterday, total), production per string over the last 30 days and the share of each string in the total production.
 
   <img src="https://raw.githubusercontent.com/berwil84afk/ha-pv-summary/main/docs/strings.jpg" alt="Strings tab with stacked power per string" width="640">
+
+- **Modules** (at the bottom of the Strings tab): every module is shown as a solar panel tile that glows brighter the more power it delivers. A string with several modules gets one tile per module, each showing its share of the string power. Brightness is relative to the strongest module, or, switchable, each string relative to its own peak of the day. A slider runs through the day shown above (from sunrise to sunset), ▶ plays it back, and a line in the power per string chart marks the selected time; **Now** returns to the live values. Administrators can use **Arrange** to drag the tiles to match the roof and rotate them; the arrangement is saved in Home Assistant and applies to all devices. The area is as high as the arrangement needs and scrolls once it gets taller than 600 pixels. Clicking a tile opens the history of its string.
+
+  <img src="https://raw.githubusercontent.com/berwil84afk/ha-pv-summary/main/docs/modules.jpg" alt="Module view with glowing panel tiles and a time slider" width="640">
 
 - Clicking a value in the energy flow, the batteries or the strings opens the history of that sensor. With several systems you switch between them at the top right.
 - Light and dark design follow your Home Assistant theme, and on a phone everything is stacked vertically.

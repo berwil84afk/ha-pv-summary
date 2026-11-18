@@ -250,10 +250,12 @@
             "name": "Name",
             "string_power_entity": "String power",
             "string_voltage_entity": "Voltage (optional)",
-            "string_current_entity": "Current (optional)"
+            "string_current_entity": "Current (optional)",
+            "string_modules": "Number of modules"
           },
           "data_description": {
-            "string_power_entity": "Sensor with the current power of this string in W or kW."
+            "string_power_entity": "Sensor with the current power of this string in W or kW.",
+            "string_modules": "How many modules this string has. The module view in the Strings tab shows that many tiles, each with its share of the power."
           }
         },
         "reconfigure": {
@@ -262,10 +264,12 @@
             "name": "Name",
             "string_power_entity": "String power",
             "string_voltage_entity": "Voltage (optional)",
-            "string_current_entity": "Current (optional)"
+            "string_current_entity": "Current (optional)",
+            "string_modules": "Number of modules"
           },
           "data_description": {
-            "string_power_entity": "Sensor with the current power of this string in W or kW."
+            "string_power_entity": "Sensor with the current power of this string in W or kW.",
+            "string_modules": "How many modules this string has. The module view in the Strings tab shows that many tiles, each with its share of the power."
           }
         }
       }

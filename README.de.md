@@ -74,7 +74,7 @@ Unter **Konfigurieren** kannst du den **Strompreis je kWh**, die **Einspeiseverg
 
 ## Strings (optional)
 
-Über **String hinzufügen** trägst du einzelne PV-Strings ein: Leistung (Pflicht), Spannung und Strom (optional). Jeder String bekommt ein eigenes Gerät mit *Leistung*, *Produktion heute*, *Produktion gesamt* und gegebenenfalls *Spannung* und *Strom*. Sobald mindestens ein String eingetragen ist, hat das Dashboard einen zusätzlichen Tab **Strings**.
+Über **String hinzufügen** trägst du einzelne PV-Strings ein: Leistung (Pflicht), Spannung und Strom (optional) sowie die Anzahl der Module des Strings (Standard 1) für die Modulansicht. Jeder String bekommt ein eigenes Gerät mit *Leistung*, *Produktion heute*, *Produktion gesamt* und gegebenenfalls *Spannung* und *Strom*. Sobald mindestens ein String eingetragen ist, hat das Dashboard einen zusätzlichen Tab **Strings**.
 
 ## Erzeugte Sensoren
 
@@ -126,6 +126,10 @@ Die Integration bringt ihr eigenes Dashboard mit. Es erscheint nach dem Einricht
 - Tab **Strings**: Leistung je String über den Tag, ebenfalls auf 5 Minuten geglättet und mit Sonnenbogen, wahlweise als **Gestapelt** (Standard; die Flächen ergeben zusammen die gesamte PV-Leistung, der Tooltip zeigt die Summe) oder **Linien** (mit Band), mit Tage blättern und Zoom. Die Wahl merkt sich der Browser. Dazu Ertrag je String (aktuelle Leistung groß, heute, gestern, gesamt), Produktion je String der letzten 30 Tage und Anteil jedes Strings am Gesamtertrag.
 
   <img src="https://raw.githubusercontent.com/berwil84afk/ha-pv-summary/main/docs/strings.jpg" alt="Tab Strings mit gestapelter Leistung je String" width="640">
+
+- **Module** (unten im Tab Strings): Jedes Modul erscheint als Kachel im Look eines Solarmoduls, die umso heller leuchtet, je mehr Leistung es bringt. Ein String mit mehreren Modulen bekommt eine Kachel je Modul, jede zeigt ihren Anteil an der Leistung des Strings. Die Helligkeit richtet sich nach dem stärksten Modul, umschaltbar auch je String nach seinem eigenen Tageshöchstwert. Ein Schieber durchläuft den oben gewählten Tag (Sonnenaufgang bis -untergang), ▶ spielt ihn ab, und eine Linie in „Leistung je String“ markiert die gewählte Uhrzeit; **Jetzt** springt zurück zu den Live-Werten. Administratoren ziehen die Kacheln über **Anordnen** so hin, wie sie auf dem Dach liegen, und drehen sie; die Anordnung wird in Home Assistant gespeichert und gilt auf allen Geräten. Die Fläche ist so hoch, wie die Anordnung es braucht, und lässt sich ab 600 Pixeln Höhe scrollen. Ein Klick auf eine Kachel öffnet den Verlauf ihres Strings.
+
+  <img src="https://raw.githubusercontent.com/berwil84afk/ha-pv-summary/main/docs/modules.jpg" alt="Modulansicht mit leuchtenden Modulkacheln und Zeitschieber" width="640">
 
 - Ein Klick auf einen Wert im Energiefluss, bei den Akkus oder Strings öffnet den Verlauf des Sensors. Bei mehreren Anlagen schaltest du oben rechts zwischen ihnen um.
 - Helles und dunkles Design folgen deinem Home-Assistant-Theme, auf dem Handy wird alles untereinander angezeigt.

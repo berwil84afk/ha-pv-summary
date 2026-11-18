@@ -16,6 +16,7 @@ from homeassistant.helpers import entity_registry as er
 from .const import (
     CONF_BATTERY_CAPACITY,
     CONF_INVESTMENT,
+    CONF_STRING_MODULES,
     CONF_THRESHOLD,
     DEFAULT_THRESHOLD,
     DOMAIN,
@@ -40,6 +41,7 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
             [StaticPathConfig(STATIC_URL, str(FRONTEND_DIR), cache_headers=False)]
         )
         websocket_api.async_register_command(hass, ws_get_config)
+        websocket_api.async_register_command(hass, ws_save_layout)
         store["static_registered"] = True
     if store.get("panel_registered"):
         return
@@ -86,6 +88,7 @@ def ws_get_config(
                 "type": sub.subentry_type,
                 "title": sub.title,
                 "capacity": sub.data.get(CONF_BATTERY_CAPACITY),
+                "modules": int(sub.data.get(CONF_STRING_MODULES) or 1),
                 "entities": {},
             }
             for sub in entry.subentries.values()
@@ -106,6 +109,7 @@ def ws_get_config(
                 "title": entry.title,
                 "threshold": config.get(CONF_THRESHOLD, DEFAULT_THRESHOLD),
                 "investment": config.get(CONF_INVESTMENT),
+                "layout": getattr(entry, "runtime_data", None) and entry.runtime_data.data.get("layout"),
                 "currency": hass.config.currency,
                 "entities": entities,
                 "batteries": [s for s in subs.values() if s["type"] == SUBENTRY_BATTERY],
@@ -113,3 +117,40 @@ def ws_get_config(
             }
         )
     connection.send_result(msg["id"], {"version": VERSION, "entries": entries})
+
+
+def _clean_layout(layout: dict[str, Any]) -> dict[str, Any]:
+    """Nur bekannte Felder mit gültigen Werten übernehmen (Positionen in Breiten der Fläche: x 0 bis 1, y 0 bis 10)."""
+    tiles: dict[str, dict[str, Any]] = {}
+    for key, tile in list((layout.get("tiles") or {}).items())[:1000]:
+        if not isinstance(key, str) or len(key) > 100 or not isinstance(tile, dict):
+            continue
+        try:
+            x = min(max(float(tile.get("x", 0)), 0.0), 1.0)
+            y = min(max(float(tile.get("y", 0)), 0.0), 10.0)
+        except (TypeError, ValueError):
+            continue
+        tiles[key] = {"x": round(x, 4), "y": round(y, 4), "rot": bool(tile.get("rot"))}
+    return {"mode": "own" if layout.get("mode") == "own" else "max", "tiles": tiles}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "pv_summary/layout",
+        vol.Required("entry_id"): str,
+        vol.Required("layout"): dict,
+    }
+)
+@websocket_api.require_admin
+@callback
+def ws_save_layout(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Anordnung der Modulansicht einer Anlage speichern (gilt für alle Geräte und Nutzer)."""
+    entry = hass.config_entries.async_get_entry(msg["entry_id"])
+    if entry is None or entry.domain != DOMAIN or not hasattr(entry, "runtime_data"):
+        connection.send_error(msg["id"], "not_found", "PV Summary entry not found")
+        return
+    layout = _clean_layout(msg["layout"])
+    entry.runtime_data.async_set_layout(layout)
+    connection.send_result(msg["id"], {"layout": layout})

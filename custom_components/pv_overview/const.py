@@ -17,7 +17,7 @@ CONF_PRICE_EXPORT = "price_export"  # Einspeisevergütung je kWh
 CONF_INVESTMENT = "investment"  # Anschaffungskosten der Anlage
 
 # Eigenes Dashboard (Panel in der Seitenleiste)
-VERSION = "1.15.2"
+VERSION = "1.16.0"
 # Eigene Adresse, damit sie nicht mit einem Lovelace-Dashboard "pv-summary" kollidiert
 PANEL_URL = "pv-summary-panel"
 STATIC_URL = "/pv_summary_static"
@@ -29,6 +29,7 @@ CONF_BATTERY_CAPACITY = "battery_capacity"  # kWh, optional, gewichtet den gemei
 CONF_STRING_POWER = "string_power_entity"
 CONF_STRING_VOLTAGE = "string_voltage_entity"
 CONF_STRING_CURRENT = "string_current_entity"
+CONF_STRING_MODULES = "string_modules"  # Anzahl Module des Strings (für die Modulansicht), Standard 1
 
 # Akku-Felder (bis v1.5 direkt in der Integration, seit v1.6 je Akku-Unter-Eintrag)
 SECTION_BATTERY = "battery"
