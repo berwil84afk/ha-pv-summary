@@ -69,15 +69,19 @@ const STYLE = `
   .cbar .ct { flex:1; font-weight:500; color:var(--primary-text-color); }
   .cbar .cgrip { font-size:16px; line-height:1; }
   .head .cedit, .head > .chips > .navbtn { margin-left:4px; }
-  .modroof-wrap { overflow:auto; max-height:600px; border-radius:8px; }
-  .modroof { position:relative; min-width:520px; border-radius:8px; container-type:inline-size; background:repeating-linear-gradient(135deg, rgba(150,80,60,.10) 0 14px, rgba(150,80,60,.04) 14px 28px); }
+  .modcard { display:flex; flex-direction:column; }
+  .modroof-wrap { flex:1; display:flex; flex-direction:column; border-radius:8px; min-height:0; }
+  .modroof-wrap.edit { display:block; flex:none; overflow:auto; max-height:600px; }
+  .modroof.fit { flex:1; }
+  .modroof.edit { min-width:520px; }
+  .modroof { position:relative; border-radius:8px; background:repeating-linear-gradient(135deg, rgba(150,80,60,.10) 0 14px, rgba(150,80,60,.04) 14px 28px); }
   .modroof.edit { outline:1px dashed var(--divider-color, rgba(0,0,0,.25)); background-image:linear-gradient(var(--divider-color, rgba(0,0,0,.08)) 1px, transparent 1px), linear-gradient(90deg, var(--divider-color, rgba(0,0,0,.08)) 1px, transparent 1px);  }
   .modtile { position:absolute; box-sizing:border-box; border-radius:6px; border:3px solid #1b2a44; padding:6px; display:flex; flex-direction:column; justify-content:flex-end; color:#fff; cursor:pointer; transition:background 1s ease, box-shadow 1s ease; user-select:none; overflow:hidden; }
   .modroof.edit .modtile { cursor:grab; transition:none; touch-action:none; }
   .modroof.edit .modtile.drag { cursor:grabbing; z-index:2; outline:2px solid var(--primary-color, #03a9f4); }
-  .modtile .mn { font-size:max(10px, 1.3cqw); text-shadow:0 1px 3px #000; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .modtile .mv { font-size:max(11px, 1.7cqw); font-weight:500; text-shadow:0 1px 3px #000; white-space:nowrap; }
-  .modtile .mrot { position:absolute; top:3px; right:5px; font-size:max(12px, 1.6cqw); cursor:pointer; text-shadow:0 1px 3px #000; }
+  .modtile .mn { font-size:1em; text-shadow:0 1px 3px #000; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .modtile .mv { font-size:1.3em; font-weight:500; text-shadow:0 1px 3px #000; white-space:nowrap; }
+  .modtile .mrot { position:absolute; top:3px; right:5px; font-size:1.25em; cursor:pointer; text-shadow:0 1px 3px #000; }
   .modbar { display:flex; align-items:center; gap:8px; margin-top:10px; font-size:12px; }
   .modbar input[type=range] { flex:1; min-width:80px; accent-color:${SUN_COLOR}; }
   .modbar .modtm { min-width:44px; text-align:right; font-weight:500; }
@@ -1827,13 +1831,15 @@ class PVSummaryPanel extends HTMLElement {
       : `<span class="navbtns">${this._isToday ? `<button class="navbtn modlive" data-nav="mod-live"${this._modT === null ? ' style="display:none"' : ""}>${TT("Jetzt", "Now")}</button>` : ""}${admin ? `<button class="navbtn" data-nav="mod-edit">${TT("Anordnen", "Arrange")}</button>` : ""}</span>`;
     const roof = tiles.map((t, i) => {
       const p = pos[i], tw = p.rot ? h : w, th = p.rot ? w : h;
-      return `<div class="modtile" data-mod="${t.key}" data-key="${t.s.id}|string_power" style="left:${(p.x * 100).toFixed(2)}%;top:${((p.y / H) * 100).toFixed(2)}%;width:${(tw * 100).toFixed(2)}%;height:${((th / H) * 100).toFixed(2)}%">`
+      const geo = `data-x="${p.x}" data-y="${p.y}" data-w="${tw}" data-h="${th}"`;
+      const style = edit ? ` style="left:${(p.x * 100).toFixed(2)}%;top:${((p.y / H) * 100).toFixed(2)}%;width:${(tw * 100).toFixed(2)}%;height:${((th / H) * 100).toFixed(2)}%"` : "";
+      return `<div class="modtile" data-mod="${t.key}" data-key="${t.s.id}|string_power" ${geo}${style}>`
         + `${edit ? `<span class="mrot" data-modrot="${t.key}" title="${TT("Drehen", "Rotate")}">↻</span>` : ""}<span class="mn">${escapeHtml(t.name)}</span><span class="mv"></span></div>`;
     }).join("");
     const playing = !!this._modTimer;
     const time = (ms) => fmtTime(ms);
     return `<div class="card modcard"><h3><ha-icon icon="mdi:solar-panel"></ha-icon>${TT("Module", "Modules")}<span class="hint modmode"></span>${btns}</h3>
-      <div class="modroof-wrap"><div class="modroof${edit ? " edit" : ""}" data-h="${H.toFixed(4)}" style="aspect-ratio:1 / ${H.toFixed(4)}${edit ? `;background-size:5% ${(5 / H).toFixed(3)}%` : ""}">${roof}</div></div>
+      <div class="modroof-wrap${edit ? " edit" : ""}"><div class="modroof${edit ? " edit" : " fit"}" data-h="${H.toFixed(4)}"${edit ? ` style="aspect-ratio:1 / ${H.toFixed(4)};background-size:5% ${(5 / H).toFixed(3)}%"` : ""}>${roof}</div></div>
       <div class="modbar"><button class="navbtn" data-nav="mod-play" title="${TT("Tag abspielen", "Play the day")}">${playing ? "❚❚" : "▶"}</button>
         <span class="muted">${time(a)}</span><input type="range" class="modsl" min="${a}" max="${b}" step="${5 * 60000}" value="${this._modT ?? b}"><span class="muted">${time(b)}</span><b class="modtm"></b></div>
       <div class="muted modsum" style="font-size:12px"></div></div>`;
@@ -1873,10 +1879,49 @@ class PVSummaryPanel extends HTMLElement {
     }
   }
 
+  // Normale Ansicht: Anordnung so vergrößern, dass sie die Fläche mit etwas Rand ausfüllt, und mittig setzen.
+  // Beim Anordnen nur die Schriftgröße an die Kachel anpassen.
+  _layoutModules() {
+    const roof = this._content?.querySelector(".modcard .modroof");
+    if (!roof) return;
+    const tiles = [...roof.querySelectorAll(".modtile")];
+    const font = (el, px) => { el.style.fontSize = `${Math.min(18, Math.max(10, px * 0.13)).toFixed(1)}px`; };
+    if (!roof.classList.contains("fit")) {
+      for (const el of tiles) font(el, el.offsetWidth);
+      return;
+    }
+    if (!tiles.length) return;
+    const d = tiles.map((el) => ({ el, x: +el.dataset.x, y: +el.dataset.y, w: +el.dataset.w, h: +el.dataset.h }));
+    const minX = Math.min(...d.map((t) => t.x)), minY = Math.min(...d.map((t) => t.y));
+    const bw = Math.max(...d.map((t) => t.x + t.w)) - minX, bh = Math.max(...d.map((t) => t.y + t.h)) - minY;
+    const W = roof.clientWidth;
+    if (!W) return;
+    // Breite füllt höchstens 92 %, eine Kachel höchstens 22 % der Breite und 180 px (sonst werden wenige Module riesig)
+    const maxW = Math.max(...d.map((t) => t.w));
+    const scale = Math.min((0.92 / bw) * W, (0.22 / maxW) * W, 180 / maxW);
+    const pad = Math.max(12, W * 0.03);
+    roof.style.minHeight = `${Math.round(bh * scale + 2 * pad)}px`;
+    const H = roof.clientHeight;
+    const offX = (W - bw * scale) / 2 - minX * scale, offY = (H - bh * scale) / 2 - minY * scale;
+    for (const t of d) {
+      Object.assign(t.el.style, { left: `${(offX + t.x * scale).toFixed(1)}px`, top: `${(offY + t.y * scale).toFixed(1)}px`, width: `${(t.w * scale).toFixed(1)}px`, height: `${(t.h * scale).toFixed(1)}px` });
+      font(t.el, Math.min(t.w, t.h) * scale);
+    }
+  }
+
   _bindModules() {
     const card = this._content.querySelector(".modcard");
     if (!card) return;
     this._updateModules();
+    this._layoutModules();
+    // Neu einpassen, wenn sich die Breite ändert (Fenster, halbe Breite)
+    this._modRO?.disconnect();
+    const roofEl = card.querySelector(".modroof");
+    if (roofEl && window.ResizeObserver) {
+      let lastW = roofEl.clientWidth;
+      this._modRO = new ResizeObserver(() => { if (roofEl.clientWidth !== lastW) { lastW = roofEl.clientWidth; this._layoutModules(); } });
+      this._modRO.observe(roofEl);
+    }
     const sl = card.querySelector(".modsl");
     sl?.addEventListener("input", () => { this._modStop(); this._modT = Number(sl.value); this._updateModules(); });
     const roof = card.querySelector(".modroof");
