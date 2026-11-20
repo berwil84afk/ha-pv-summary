@@ -76,7 +76,7 @@ const STYLE = `
   .modroof.edit { min-width:520px; }
   .modroof { position:relative; border-radius:8px; background:repeating-linear-gradient(135deg, rgba(150,80,60,.10) 0 14px, rgba(150,80,60,.04) 14px 28px); }
   .modroof.edit { outline:1px dashed var(--divider-color, rgba(0,0,0,.25)); background-image:linear-gradient(var(--divider-color, rgba(0,0,0,.08)) 1px, transparent 1px), linear-gradient(90deg, var(--divider-color, rgba(0,0,0,.08)) 1px, transparent 1px);  }
-  .modtile { position:absolute; box-sizing:border-box; border-radius:6px; border:3px solid #1b2a44; padding:6px; display:flex; flex-direction:column; justify-content:flex-end; color:#fff; cursor:pointer; transition:background 1s ease, box-shadow 1s ease; user-select:none; overflow:hidden; }
+  .modtile { position:absolute; box-sizing:border-box; border-radius:6px; border:3px solid #9aa6b5; padding:6px; display:flex; flex-direction:column; justify-content:flex-end; color:#fff; cursor:pointer; transition:background 1s ease, box-shadow 1s ease; user-select:none; overflow:hidden; }
   .modtile.black { border-color:#000; }
   .modroof.edit .modtile { cursor:grab; transition:none; touch-action:none; }
   .modroof.edit .modtile.drag { cursor:grabbing; z-index:2; outline:2px solid var(--primary-color, #03a9f4); }
@@ -1863,8 +1863,14 @@ class PVSummaryPanel extends HTMLElement {
       if (!el) return;
       const p = Math.max(0, Math.min(1, lay.mode === "own" ? (pow[t.s.id] || 0) / Math.max(50, peak[t.s.id] || 0) : vals[i] / ref));
       const l = 10 + p * 45;
-      if (t.s.color === "black") el.style.background = "repeating-linear-gradient(90deg, transparent 0 calc(16.66% - 1px), rgba(255,255,255,.05) calc(16.66% - 1px) 16.66%), repeating-linear-gradient(0deg, transparent 0 calc(10% - 1px), rgba(255,255,255,.05) calc(10% - 1px) 10%), linear-gradient(160deg, #1c1d20 0%, #0b0b0c 70%, #050505 100%)";
-      else el.style.background = `repeating-linear-gradient(90deg, transparent 0 calc(33.33% - 1px), rgba(255,255,255,.3) calc(33.33% - 1px) 33.33%), repeating-linear-gradient(0deg, transparent 0 calc(16.66% - 1px), rgba(255,255,255,.3) calc(16.66% - 1px) 16.66%), linear-gradient(160deg, hsl(210,75%,${(l + 15).toFixed(1)}%) 0%, hsl(218,78%,${l.toFixed(1)}%) 60%, hsl(225,80%,${(l * 0.6).toFixed(1)}%) 100%)`;
+      // Feines Zellraster (6 × 10) für beide Modularten; die Fläche wird mit der Leistung heller
+      const cells = (a) => `repeating-linear-gradient(90deg, transparent 0 calc(16.66% - 1px), rgba(255,255,255,${a}) calc(16.66% - 1px) 16.66%), repeating-linear-gradient(0deg, transparent 0 calc(10% - 1px), rgba(255,255,255,${a}) calc(10% - 1px) 10%)`;
+      if (t.s.color === "black") {
+        const k = 5 + p * 25; // Full Black: von tiefschwarz zu anthrazit
+        el.style.background = `${cells(0.07)}, linear-gradient(160deg, hsl(220,6%,${(k + 6).toFixed(1)}%) 0%, hsl(220,6%,${k.toFixed(1)}%) 60%, hsl(220,6%,${(k * 0.5).toFixed(1)}%) 100%)`;
+      } else {
+        el.style.background = `${cells(0.12)}, linear-gradient(160deg, hsl(210,75%,${(l + 15).toFixed(1)}%) 0%, hsl(218,78%,${l.toFixed(1)}%) 60%, hsl(225,80%,${(l * 0.6).toFixed(1)}%) 100%)`;
+      }
       el.style.boxShadow = `0 0 ${(p * 30).toFixed(1)}px ${(p * 8).toFixed(1)}px rgba(255,200,40,${(p * 0.8).toFixed(2)})`;
       el.querySelector(".mv").textContent = fmtW(vals[i]);
     });
