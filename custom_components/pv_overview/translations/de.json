@@ -251,11 +251,13 @@
             "string_power_entity": "Leistung des Strings",
             "string_voltage_entity": "Spannung (optional)",
             "string_current_entity": "Strom (optional)",
-            "string_modules": "Anzahl Module"
+            "string_modules": "Anzahl Module",
+            "string_color": "Modulfarbe"
           },
           "data_description": {
             "string_power_entity": "Sensor mit der aktuellen Leistung dieses Strings in W oder kW.",
-            "string_modules": "Wie viele Module dieser String hat. Die Modulansicht im Tab Strings zeigt so viele Kacheln, jede mit ihrem Anteil an der Leistung."
+            "string_modules": "Wie viele Module dieser String hat. Die Modulansicht im Tab Strings zeigt so viele Kacheln, jede mit ihrem Anteil an der Leistung.",
+            "string_color": "Aussehen der Module in der Modulansicht im Tab Strings."
           }
         },
         "reconfigure": {
@@ -265,13 +267,23 @@
             "string_power_entity": "Leistung des Strings",
             "string_voltage_entity": "Spannung (optional)",
             "string_current_entity": "Strom (optional)",
-            "string_modules": "Anzahl Module"
+            "string_modules": "Anzahl Module",
+            "string_color": "Modulfarbe"
           },
           "data_description": {
             "string_power_entity": "Sensor mit der aktuellen Leistung dieses Strings in W oder kW.",
-            "string_modules": "Wie viele Module dieser String hat. Die Modulansicht im Tab Strings zeigt so viele Kacheln, jede mit ihrem Anteil an der Leistung."
+            "string_modules": "Wie viele Module dieser String hat. Die Modulansicht im Tab Strings zeigt so viele Kacheln, jede mit ihrem Anteil an der Leistung.",
+            "string_color": "Aussehen der Module in der Modulansicht im Tab Strings."
           }
         }
+      }
+    }
+  },
+  "selector": {
+    "string_color": {
+      "options": {
+        "blue": "Blau",
+        "black": "Full Black (schwarz)"
       }
     }
   }

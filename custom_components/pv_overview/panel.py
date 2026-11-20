@@ -16,6 +16,7 @@ from homeassistant.helpers import entity_registry as er
 from .const import (
     CONF_BATTERY_CAPACITY,
     CONF_INVESTMENT,
+    CONF_STRING_COLOR,
     CONF_STRING_MODULES,
     CONF_THRESHOLD,
     DEFAULT_THRESHOLD,
@@ -90,6 +91,7 @@ def ws_get_config(
                 "title": sub.title,
                 "capacity": sub.data.get(CONF_BATTERY_CAPACITY),
                 "modules": int(sub.data.get(CONF_STRING_MODULES) or 1),
+                "color": sub.data.get(CONF_STRING_COLOR) or "blue",
                 "entities": {},
             }
             for sub in entry.subentries.values()
@@ -158,7 +160,7 @@ def _clean_layout(layout: dict[str, Any]) -> dict[str, Any]:
         except (TypeError, ValueError):
             continue
         tiles[key] = {"x": round(x, 4), "y": round(y, 4), "rot": bool(tile.get("rot"))}
-    return {"mode": "own" if layout.get("mode") == "own" else "max", "tiles": tiles}
+    return {"mode": layout.get("mode") if layout.get("mode") in ("own", "day") else "max", "tiles": tiles}
 
 
 @websocket_api.websocket_command(

@@ -251,11 +251,13 @@
             "string_power_entity": "String power",
             "string_voltage_entity": "Voltage (optional)",
             "string_current_entity": "Current (optional)",
-            "string_modules": "Number of modules"
+            "string_modules": "Number of modules",
+            "string_color": "Module colour"
           },
           "data_description": {
             "string_power_entity": "Sensor with the current power of this string in W or kW.",
-            "string_modules": "How many modules this string has. The module view in the Strings tab shows that many tiles, each with its share of the power."
+            "string_modules": "How many modules this string has. The module view in the Strings tab shows that many tiles, each with its share of the power.",
+            "string_color": "Look of the modules in the module view of the Strings tab."
           }
         },
         "reconfigure": {
@@ -265,13 +267,23 @@
             "string_power_entity": "String power",
             "string_voltage_entity": "Voltage (optional)",
             "string_current_entity": "Current (optional)",
-            "string_modules": "Number of modules"
+            "string_modules": "Number of modules",
+            "string_color": "Module colour"
           },
           "data_description": {
             "string_power_entity": "Sensor with the current power of this string in W or kW.",
-            "string_modules": "How many modules this string has. The module view in the Strings tab shows that many tiles, each with its share of the power."
+            "string_modules": "How many modules this string has. The module view in the Strings tab shows that many tiles, each with its share of the power.",
+            "string_color": "Look of the modules in the module view of the Strings tab."
           }
         }
+      }
+    }
+  },
+  "selector": {
+    "string_color": {
+      "options": {
+        "blue": "Blue",
+        "black": "Full black"
       }
     }
   }

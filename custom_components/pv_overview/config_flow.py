@@ -33,6 +33,7 @@ from .const import (
     CONF_PRICE_EXPORT,
     CONF_PRICE_IMPORT,
     CONF_SOURCE,
+    CONF_STRING_COLOR,
     CONF_STRING_CURRENT,
     CONF_STRING_MODULES,
     CONF_STRING_POWER,
@@ -43,6 +44,7 @@ from .const import (
     DOMAIN,
     GRID_MIGRATED,
     SUBENTRY_BATTERY,
+    STRING_COLORS,
     SUBENTRY_STRING,
 )
 
@@ -57,6 +59,9 @@ PRICE_SELECTOR = selector.NumberSelector(
 )
 INVESTMENT_SELECTOR = selector.NumberSelector(
     selector.NumberSelectorConfig(min=0, max=10_000_000, step=1, mode=selector.NumberSelectorMode.BOX)
+)
+COLOR_SELECTOR = selector.SelectSelector(
+    selector.SelectSelectorConfig(options=list(STRING_COLORS), translation_key="string_color", mode=selector.SelectSelectorMode.LIST)
 )
 MODULES_SELECTOR = selector.NumberSelector(
     selector.NumberSelectorConfig(min=1, max=200, step=1, mode=selector.NumberSelectorMode.BOX)
@@ -234,10 +239,12 @@ class StringSubentryFlow(_BaseSubentryFlow):
                 _optional(CONF_STRING_VOLTAGE, config): SOURCE_SELECTOR,
                 _optional(CONF_STRING_CURRENT, config): SOURCE_SELECTOR,
                 vol.Required(CONF_STRING_MODULES, default=int(config.get(CONF_STRING_MODULES) or 1)): MODULES_SELECTOR,
+                vol.Required(CONF_STRING_COLOR, default=config.get(CONF_STRING_COLOR) or "blue"): COLOR_SELECTOR,
             }
         )
 
     def _data(self, user_input: dict[str, Any]) -> dict[str, Any]:
         data = super()._data(user_input)
         data[CONF_STRING_MODULES] = max(1, int(user_input.get(CONF_STRING_MODULES) or 1))
+        data[CONF_STRING_COLOR] = user_input.get(CONF_STRING_COLOR) if user_input.get(CONF_STRING_COLOR) in STRING_COLORS else "blue"
         return data

@@ -77,6 +77,7 @@ const STYLE = `
   .modroof { position:relative; border-radius:8px; background:repeating-linear-gradient(135deg, rgba(150,80,60,.10) 0 14px, rgba(150,80,60,.04) 14px 28px); }
   .modroof.edit { outline:1px dashed var(--divider-color, rgba(0,0,0,.25)); background-image:linear-gradient(var(--divider-color, rgba(0,0,0,.08)) 1px, transparent 1px), linear-gradient(90deg, var(--divider-color, rgba(0,0,0,.08)) 1px, transparent 1px);  }
   .modtile { position:absolute; box-sizing:border-box; border-radius:6px; border:3px solid #1b2a44; padding:6px; display:flex; flex-direction:column; justify-content:flex-end; color:#fff; cursor:pointer; transition:background 1s ease, box-shadow 1s ease; user-select:none; overflow:hidden; }
+  .modtile.black { border-color:#000; }
   .modroof.edit .modtile { cursor:grab; transition:none; touch-action:none; }
   .modroof.edit .modtile.drag { cursor:grabbing; z-index:2; outline:2px solid var(--primary-color, #03a9f4); }
   .modtile .mn { font-size:1em; text-shadow:0 1px 3px #000; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -210,6 +211,7 @@ class PVSummaryPanel extends HTMLElement {
     this._modDraft = null;   // Anordnung während des Bearbeitens
     this._modDrag = null;    // gerade gezogene Kachel
     this._modTimer = null;   // Abspielen des Tages
+    this._modSpeed = [0.5, 1, 2, 4].includes(Number(loadPref("pv-summary-modspeed", "1"))) ? Number(loadPref("pv-summary-modspeed", "1")) : 1;
     this._cardEdit = false;  // Karten anpassen aktiv
     this._cardDraft = null;  // Kartenanordnung während des Anpassens
     this._cardDrag = null;   // gerade gezogene Karte
@@ -1826,6 +1828,7 @@ class PVSummaryPanel extends HTMLElement {
       ? `<span class="navbtns">
           <button class="navbtn ${lay.mode !== "own" ? "active" : ""}" data-nav="mod-mode-max" title="${TT("Hellstes Modul = 100 %", "Brightest module = 100 %")}">${TT("rel. zum stärksten", "rel. to strongest")}</button>
           <button class="navbtn ${lay.mode === "own" ? "active" : ""}" data-nav="mod-mode-own" title="${TT("Jeder String zu seinem Tageshöchstwert", "Each string to its peak of the day")}">${TT("je String eigenes Max.", "own peak per string")}</button>
+          <button class="navbtn ${lay.mode === "day" ? "active" : ""}" data-nav="mod-mode-day" title="${TT("Höchster Wert eines Moduls am ganzen Tag = 100 %", "Highest module value of the whole day = 100 %")}">${TT("zum Tagesmaximum", "to the day's peak")}</button>
           <button class="navbtn" data-nav="mod-cancel">${TT("Abbrechen", "Cancel")}</button>
           <button class="navbtn active" data-nav="mod-done">${TT("Fertig", "Done")}</button></span>`
       : `<span class="navbtns">${this._isToday ? `<button class="navbtn modlive" data-nav="mod-live"${this._modT === null ? ' style="display:none"' : ""}>${TT("Jetzt", "Now")}</button>` : ""}${admin ? `<button class="navbtn" data-nav="mod-edit">${TT("Anordnen", "Arrange")}</button>` : ""}</span>`;
@@ -1833,14 +1836,14 @@ class PVSummaryPanel extends HTMLElement {
       const p = pos[i], tw = p.rot ? h : w, th = p.rot ? w : h;
       const geo = `data-x="${p.x}" data-y="${p.y}" data-w="${tw}" data-h="${th}"`;
       const style = edit ? ` style="left:${(p.x * 100).toFixed(2)}%;top:${((p.y / H) * 100).toFixed(2)}%;width:${(tw * 100).toFixed(2)}%;height:${((th / H) * 100).toFixed(2)}%"` : "";
-      return `<div class="modtile" data-mod="${t.key}" data-key="${t.s.id}|string_power" ${geo}${style}>`
+      return `<div class="modtile${t.s.color === "black" ? " black" : ""}" data-mod="${t.key}" data-key="${t.s.id}|string_power" ${geo}${style}>`
         + `${edit ? `<span class="mrot" data-modrot="${t.key}" title="${TT("Drehen", "Rotate")}">↻</span>` : ""}<span class="mn">${escapeHtml(t.name)}</span><span class="mv"></span></div>`;
     }).join("");
     const playing = !!this._modTimer;
     const time = (ms) => fmtTime(ms);
     return `<div class="card modcard"><h3><ha-icon icon="mdi:solar-panel"></ha-icon>${TT("Module", "Modules")}<span class="hint modmode"></span>${btns}</h3>
       <div class="modroof-wrap${edit ? " edit" : ""}"><div class="modroof${edit ? " edit" : " fit"}" data-h="${H.toFixed(4)}"${edit ? ` style="aspect-ratio:1 / ${H.toFixed(4)};background-size:5% ${(5 / H).toFixed(3)}%"` : ""}>${roof}</div></div>
-      <div class="modbar"><button class="navbtn" data-nav="mod-play" title="${TT("Tag abspielen", "Play the day")}">${playing ? "❚❚" : "▶"}</button>
+      <div class="modbar"><button class="navbtn" data-nav="mod-play" title="${TT("Tag abspielen", "Play the day")}">${playing ? "❚❚" : "▶"}</button><button class="navbtn modspeed" data-nav="mod-speed" title="${TT("Tempo beim Abspielen", "Playback speed")}">${fmt(this._modSpeed, this._modSpeed < 1 ? 1 : 0)}×</button>
         <span class="muted">${time(a)}</span><input type="range" class="modsl" min="${a}" max="${b}" step="${5 * 60000}" value="${this._modT ?? b}"><span class="muted">${time(b)}</span><b class="modtm"></b></div>
       <div class="muted modsum" style="font-size:12px"></div></div>`;
   }
@@ -1852,13 +1855,16 @@ class PVSummaryPanel extends HTMLElement {
     const tiles = this._modTiles(), lay = this._modLayout();
     const { pow, peak, live } = this._modValues();
     const vals = tiles.map((t) => (pow[t.s.id] || 0) / t.n);
-    const ref = Math.max(50, ...vals);
+    // Tagesmaximum: höchster Wert eines Moduls am ganzen angezeigten Tag (heute bis jetzt, samt Live-Wert)
+    const dayRef = Math.max(50, ...tiles.map((t) => (peak[t.s.id] || 0) / t.n), ...(live ? vals : []));
+    const ref = lay.mode === "day" ? dayRef : Math.max(50, ...vals);
     tiles.forEach((t, i) => {
       const el = card.querySelector(`[data-mod="${t.key}"]`);
       if (!el) return;
       const p = Math.max(0, Math.min(1, lay.mode === "own" ? (pow[t.s.id] || 0) / Math.max(50, peak[t.s.id] || 0) : vals[i] / ref));
       const l = 10 + p * 45;
-      el.style.background = `repeating-linear-gradient(90deg, transparent 0 calc(33.33% - 1px), rgba(255,255,255,.3) calc(33.33% - 1px) 33.33%), repeating-linear-gradient(0deg, transparent 0 calc(16.66% - 1px), rgba(255,255,255,.3) calc(16.66% - 1px) 16.66%), linear-gradient(160deg, hsl(210,75%,${(l + 15).toFixed(1)}%) 0%, hsl(218,78%,${l.toFixed(1)}%) 60%, hsl(225,80%,${(l * 0.6).toFixed(1)}%) 100%)`;
+      if (t.s.color === "black") el.style.background = "repeating-linear-gradient(90deg, transparent 0 calc(16.66% - 1px), rgba(255,255,255,.05) calc(16.66% - 1px) 16.66%), repeating-linear-gradient(0deg, transparent 0 calc(10% - 1px), rgba(255,255,255,.05) calc(10% - 1px) 10%), linear-gradient(160deg, #1c1d20 0%, #0b0b0c 70%, #050505 100%)";
+      else el.style.background = `repeating-linear-gradient(90deg, transparent 0 calc(33.33% - 1px), rgba(255,255,255,.3) calc(33.33% - 1px) 33.33%), repeating-linear-gradient(0deg, transparent 0 calc(16.66% - 1px), rgba(255,255,255,.3) calc(16.66% - 1px) 16.66%), linear-gradient(160deg, hsl(210,75%,${(l + 15).toFixed(1)}%) 0%, hsl(218,78%,${l.toFixed(1)}%) 60%, hsl(225,80%,${(l * 0.6).toFixed(1)}%) 100%)`;
       el.style.boxShadow = `0 0 ${(p * 30).toFixed(1)}px ${(p * 8).toFixed(1)}px rgba(255,200,40,${(p * 0.8).toFixed(2)})`;
       el.querySelector(".mv").textContent = fmtW(vals[i]);
     });
@@ -1868,7 +1874,8 @@ class PVSummaryPanel extends HTMLElement {
     if (sl && this._modT !== null) sl.value = this._modT;
     const liveBtn = card.querySelector(".modlive");
     if (liveBtn) liveBtn.style.display = live ? "none" : "";
-    card.querySelector(".modmode").textContent = lay.mode === "own" ? TT("Helligkeit je String zum Tageshöchstwert", "Brightness per string to its peak") : TT("Helligkeit relativ zum stärksten Modul", "Brightness relative to the strongest module");
+    card.querySelector(".modmode").textContent = lay.mode === "own" ? TT("Helligkeit je String zum Tageshöchstwert", "Brightness per string to its peak")
+      : lay.mode === "day" ? TT("Helligkeit zum Tagesmaximum", "Brightness relative to the day's peak") : TT("Helligkeit relativ zum stärksten Modul", "Brightness relative to the strongest module");
     card.querySelector(".modsum").textContent = `${TT("Summe", "Total")} ${fmtW(total)} · ${(this._entry.strings || []).length} ${TT("Strings", "strings")}, ${tiles.length} ${TT("Module", "modules")}`;
     // Senkrechte Linie in „Leistung je String“
     const line = this._content.querySelector('.curve-wrap[data-chart="strings"] .modt'), c = this._curves.strings;
@@ -1953,6 +1960,16 @@ class PVSummaryPanel extends HTMLElement {
     roof.addEventListener("pointercancel", end);
   }
 
+  // Ein 5-Minuten-Schritt alle 80 ms bei 1×, schneller bzw. langsamer je nach Tempo
+  _modPlay() {
+    this._modTimer = setInterval(() => {
+      const [, end] = this._modRange();
+      this._modT = Math.min(end, this._modT + 5 * 60000);
+      if (this._modT >= end) { this._modStop(); this._render(); return; }
+      this._updateModules();
+    }, 80 / this._modSpeed);
+  }
+
   _modStop() {
     if (this._modTimer) { clearInterval(this._modTimer); this._modTimer = null; }
   }
@@ -1962,12 +1979,7 @@ class PVSummaryPanel extends HTMLElement {
       if (this._modTimer) { this._modStop(); this._render(); return; }
       const [a, b] = this._modRange();
       if (this._modT === null || this._modT >= b) this._modT = a;
-      this._modTimer = setInterval(() => {
-        const [, end] = this._modRange();
-        this._modT = Math.min(end, this._modT + 5 * 60000);
-        if (this._modT >= end) { this._modStop(); this._render(); return; }
-        this._updateModules();
-      }, 80);
+      this._modPlay();
       this._render();
     } else if (action === "mod-live") {
       this._modStop();
@@ -1975,11 +1987,17 @@ class PVSummaryPanel extends HTMLElement {
       this._render();
     } else if (action === "mod-edit") {
       const tiles = this._modTiles(), pos = this._modPositions(tiles), lay = this._entry.layout || {};
-      this._modDraft = { mode: lay.mode === "own" ? "own" : "max", tiles: Object.fromEntries(tiles.map((t, i) => [t.key, { ...pos[i] }])) };
+      this._modDraft = { mode: ["own", "day"].includes(lay.mode) ? lay.mode : "max", tiles: Object.fromEntries(tiles.map((t, i) => [t.key, { ...pos[i] }])) };
       this._modEdit = true;
       this._render();
-    } else if (action === "mod-mode-max" || action === "mod-mode-own") {
-      if (this._modDraft) this._modDraft.mode = action === "mod-mode-own" ? "own" : "max";
+    } else if (action === "mod-mode-max" || action === "mod-mode-own" || action === "mod-mode-day") {
+      if (this._modDraft) this._modDraft.mode = action.slice(9);
+      this._render();
+    } else if (action === "mod-speed") {
+      const speeds = [0.5, 1, 2, 4];
+      this._modSpeed = speeds[(speeds.indexOf(this._modSpeed) + 1) % speeds.length];
+      savePref("pv-summary-modspeed", String(this._modSpeed));
+      if (this._modTimer) { this._modStop(); this._modPlay(); }
       this._render();
     } else if (action === "mod-cancel") {
       this._modDraft = null;
