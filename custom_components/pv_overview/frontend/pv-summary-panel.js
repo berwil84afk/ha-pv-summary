@@ -59,6 +59,25 @@ const STYLE = `
   .tip .dot { width:8px; height:8px; border-radius:50%; }
   .tip .rng { display:block; text-align:right; font-size:11px; color:var(--secondary-text-color); margin:-1px 0 2px; }
   .list { display:grid; gap:10px; font-size:14px; }
+  .curvecard { position:relative; }
+  .curvecard h3.ch1 { margin-bottom:6px; flex-wrap:wrap; row-gap:6px; }
+  .curvecard .cnav { margin-left:auto; }
+  .calbtn { display:inline-flex; align-items:center; gap:4px; }
+  .ch2 { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; margin-bottom:8px; font-size:12px; color:var(--secondary-text-color); }
+  .ch2 .clg { display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; flex:1 1 auto; min-width:0; }
+  .ch2 .clg .lg { margin-left:0; }
+  .ch2 .cctl { display:flex; gap:6px; margin-left:auto; flex-shrink:0; }
+  .calpop { position:absolute; top:44px; right:12px; z-index:5; width:260px; max-width:calc(100% - 24px); box-sizing:border-box; background:var(--card-background-color, #fff); border:1px solid var(--divider-color, rgba(0,0,0,.15)); border-radius:10px; padding:10px; box-shadow:0 6px 24px rgba(0,0,0,.35); }
+  .calhead { display:flex; align-items:center; gap:6px; font-size:13px; }
+  .calhead b { flex:1; text-align:center; font-weight:500; }
+  .calgrid { display:grid; grid-template-columns:repeat(7, 1fr); gap:3px; margin-top:8px; }
+  .calgrid .calh { font-size:11px; text-align:center; color:var(--secondary-text-color); }
+  .calday { font:inherit; font-size:12px; height:28px; border-radius:6px; border:1px solid transparent; background:var(--secondary-background-color, rgba(0,0,0,.06)); color:var(--primary-text-color); cursor:pointer; padding:0; }
+  .calday:disabled { background:transparent; color:var(--disabled-text-color, rgba(127,127,127,.6)); cursor:default; }
+  .calday.today { border-color:var(--primary-text-color); }
+  .calday.sel { outline:2px solid #ef9f27; outline-offset:-1px; }
+  .calfoot { display:flex; align-items:center; gap:8px; margin-top:8px; font-size:12px; }
+  .calfoot .muted { flex:1; }
   .cards { display:grid; gap:16px; grid-template-columns:repeat(12, minmax(0, 1fr)); }
   .cslot { min-width:0; display:flex; flex-direction:column; }
   .cslot > .card, .cslot > .kpis { flex:1; }
@@ -212,6 +231,8 @@ class PVSummaryPanel extends HTMLElement {
     this._modDrag = null;    // gerade gezogene Kachel
     this._modTimer = null;   // Abspielen des Tages
     this._modSpeed = [0.5, 1, 2, 4].includes(Number(loadPref("pv-summary-modspeed", "1"))) ? Number(loadPref("pv-summary-modspeed", "1")) : 1;
+    this._calOpen = null;    // Kalender offen an dieser Kurve ("main"/"strings") oder null
+    this._calMonth = null;   // angezeigter Monat im Kalender (Erster des Monats, ms)
     this._cardEdit = false;  // Karten anpassen aktiv
     this._cardDraft = null;  // Kartenanordnung während des Anpassens
     this._cardDrag = null;   // gerade gezogene Karte
@@ -354,6 +375,22 @@ class PVSummaryPanel extends HTMLElement {
   }
 
   _onClick(ev) {
+    const calDay = ev.target.closest("[data-calday]");
+    if (calDay) {
+      const ms = Number(calDay.dataset.calday);
+      this._calClose();
+      this._modStop();
+      this._modT = null;
+      this._day = ms >= startOfDay(Date.now()) ? null : ms;
+      this._zoom = null;
+      this._hidden = {};
+      this._hover = null;
+      this._fetchCurveHistory();
+      return;
+    }
+    const calBtn = ev.target.closest('[data-nav="day-cal"]');
+    if (calBtn) this._calChart = calBtn.dataset.chart;
+    if (this._calOpen && !calBtn && !ev.target.closest(".calpop")) { this._calClose(); this._render(); return; }
     const cardBtn = ev.target.closest("[data-card]");
     if (cardBtn) { this._onCardAction(cardBtn.dataset.card, cardBtn.dataset.id); return; }
     const view = ev.target.closest("[data-view]");
@@ -399,7 +436,8 @@ class PVSummaryPanel extends HTMLElement {
 
   _onNav(action) {
     if (action.startsWith("mod-")) { this._onModNav(action); return; }
-    if (action.startsWith("day-")) { this._modStop(); this._modT = null; }
+    if ((action.startsWith("day-") && action !== "day-cal") || action === "cal-today") { this._modStop(); this._modT = null; }
+    if (action.startsWith("day-") && action !== "day-cal") this._calClose();
     const today = startOfDay(Date.now());
     if (action === "day-prev" || action === "day-next") {
       const cur = this._day ?? today;
@@ -408,6 +446,22 @@ class PVSummaryPanel extends HTMLElement {
       this._zoom = null;
       this._hidden = {};
       this._hover = null;
+      this._fetchCurveHistory();
+    } else if (action === "day-cal") {
+      const chart = this._calChart || "main";
+      if (this._calOpen === chart) { this._calClose(); this._render(); return; }
+      this._calOpen = chart;
+      this._calSetMonth(new Date(new Date(this._dayStart).getFullYear(), new Date(this._dayStart).getMonth(), 1).getTime());
+      this._calKey = (ev) => { if (ev.key === "Escape") { this._calClose(); this._render(); } };
+      window.addEventListener("keydown", this._calKey);
+    } else if (action === "cal-prev" || action === "cal-next") {
+      const m = new Date(this._calMonth);
+      this._calSetMonth(new Date(m.getFullYear(), m.getMonth() + (action === "cal-prev" ? -1 : 1), 1).getTime());
+    } else if (action === "cal-today") {
+      this._calClose();
+      this._day = null;
+      this._zoom = null;
+      this._hidden = {};
       this._fetchCurveHistory();
     } else if (action === "day-today") {
       this._day = null;
@@ -1312,15 +1366,64 @@ class PVSummaryPanel extends HTMLElement {
     const forced = this._dayMode !== "full" && fullDay && rows.some((r) => !hidden.has(r.key) && !isPvKey(r.key));
     const dmode = `<span class="navbtns">
         <button class="navbtn ${fullDay ? "" : "active"}" data-nav="dmode-day" title="${forced ? TT("Mit eingeblendetem Haus, Akku oder Netz wird immer der ganze Tag gezeigt", "With house, battery or grid shown the whole day is always displayed") : TT("Nur der Zeitraum mit Sonne bzw. Leistung", "Only the period with sun or power")}">${TT("Tag", "Day")}</button>
-        <button class="navbtn ${fullDay ? "active" : ""}" data-nav="dmode-full">${TT("Ganzer Tag", "Full day")}</button></span>`;
-    const nav = `${dmode}<span class="navbtns">
+        <button class="navbtn ${fullDay ? "active" : ""}" data-nav="dmode-full" title="${TT("Ganzer Tag, 0 bis 24 Uhr", "Full day, 0 to 24 h")}">24 h</button></span>`;
+    const dayLabel = today ? TT("Heute", "Today") : new Date(dayStart).toLocaleDateString(LOCALE(), { day: "2-digit", month: "2-digit" });
+    const nav = `<span class="navbtns cnav">
         ${this._zoom ? `<button class="navbtn" data-nav="zoom-reset">${TT("Zoom zurücksetzen", "Reset zoom")}</button>` : ""}
         <button class="navbtn" data-nav="day-prev" title="${TT("Vortag", "Previous day")}">‹</button>
-        <button class="navbtn ${today ? "active" : ""}" data-nav="day-today">${TT("Heute", "Today")}</button>
+        <button class="navbtn calbtn ${today ? "active" : ""}" data-nav="day-cal" data-chart="${chartId}" title="${TT("Tag im Kalender wählen", "Pick a day in the calendar")}"><ha-icon icon="mdi:calendar-blank-outline" style="--mdc-icon-size:14px"></ha-icon>${dayLabel}</button>
         <button class="navbtn" data-nav="day-next" title="${TT("Nächster Tag", "Next day")}" ${today ? "disabled" : ""}>›</button></span>`;
     const empty = this._loading.curve ? LOADING() : today ? TT("Noch keine Verlaufsdaten für heute.", "No history for today yet.") : TT("Keine Daten vorhanden.", "No data available.");
     const body = !series.length && withData.length ? `<div class="empty">${TT("Alle Linien ausgeblendet.", "All lines hidden.")}</div>` : series.length ? `<div class="curve-wrap" data-chart="${chartId}"><svg viewBox="0 0 ${W} ${H}">${grid}${paths}${sel}${chartId === "strings" ? `<line class="modt" y1="${T}" y2="${H - B}" stroke="${SUN_COLOR}" stroke-width="1.5" style="display:none" pointer-events="none"/>` : ""}${hover}</svg><div class="tip" style="display:none"></div></div>` : `<div class="empty">${empty}</div>`;
-    return `<div class="card"><h3><ha-icon icon="${icon}"></ha-icon>${heading}<span class="hint">${legend}</span>${modes}${nav}</h3>${body}</div>`;
+    return `<div class="card curvecard"><h3 class="ch1"><ha-icon icon="${icon}"></ha-icon>${heading}${nav}</h3>
+      <div class="ch2"><span class="clg">${legend}</span><span class="cctl">${modes}${dmode}</span></div>${body}${this._calOpen === chartId ? this._calendarHtml() : ""}</div>`;
+  }
+
+  // Monatskalender zur Tagesauswahl: Tage mit Daten nach Ertrag eingefärbt (wie die Jahres-Heatmap)
+  _calendarHtml() {
+    const now = new Date(), todayStart = startOfDay(Date.now());
+    const m = new Date(this._calMonth ?? startOfDay(this._dayStart));
+    m.setDate(1);
+    const year = m.getFullYear(), month = m.getMonth();
+    const { raw, list } = this._yearList(year);
+    const byDay = new Map(list.map((d) => [d.start.toDateString(), d.v]));
+    const best = Math.max(0, ...list.map((d) => d.v || 0));
+    const steps = this._hass?.themes?.darkMode ? ["#27500a", "#3b6d11", "#639922", "#97c459", "#c0dd97"] : ["#c0dd97", "#97c459", "#639922", "#3b6d11", "#27500a"];
+    // Frühester bekannter Tag: aus allen geladenen Jahren dieser Anlage
+    const prefix = `${this._id("total")}|`;
+    const known = Object.entries(this._yearDays).filter(([k]) => k.startsWith(prefix)).flatMap(([, v]) => v);
+    const firstKnown = known.length ? Math.min(...known.map((d) => d.start.getTime())) : null;
+    const allLoaded = Object.keys(this._yearDays).some((k) => k === `${prefix}${year - 1}`) || month > 0;
+    const prevDisabled = firstKnown !== null && allLoaded && new Date(year, month, 1).getTime() <= startOfDay(firstKnown);
+    const nextDisabled = new Date(year, month + 1, 1) > now;
+    const names = TT(["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"], ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]);
+    let cells = names.map((n) => `<span class="calh">${n}</span>`).join("");
+    for (let i = 0; i < (new Date(year, month, 1).getDay() + 6) % 7; i++) cells += "<span></span>";
+    const sel = startOfDay(this._dayStart);
+    for (let d = 1; d <= new Date(year, month + 1, 0).getDate(); d++) {
+      const day = new Date(year, month, d), ms = day.getTime(), v = byDay.get(day.toDateString());
+      const ok = ms <= todayStart && (v !== undefined || ms === todayStart);
+      const color = v !== undefined && best > 0 && v > 0 ? steps[Math.min(4, Math.floor((v / best) * 5))] : "";
+      const cls = `${ms === sel ? " sel" : ""}${ms === todayStart ? " today" : ""}`;
+      cells += `<button class="calday${cls}" ${ok ? `data-calday="${ms}"` : "disabled"} style="${color ? `background:${color};color:#fff` : ""}" title="${v !== undefined ? `${fmt(v, 1)} kWh` : ""}">${d}</button>`;
+    }
+    const loading = !raw ? `<div class="muted" style="font-size:12px;margin-top:4px">${LOADING()}</div>` : "";
+    return `<div class="calpop" role="dialog" aria-label="${TT("Kalender", "Calendar")}">
+      <div class="calhead"><button class="navbtn" data-nav="cal-prev" ${prevDisabled ? "disabled" : ""}>‹</button><b>${m.toLocaleDateString(LOCALE(), { month: "long", year: "numeric" })}</b><button class="navbtn" data-nav="cal-next" ${nextDisabled ? "disabled" : ""}>›</button></div>
+      <div class="calgrid">${cells}</div>${loading}
+      <div class="calfoot"><span class="muted">${TT("Farbe = Ertrag des Tages", "Colour = production of the day")}</span><button class="navbtn" data-nav="cal-today">${TT("Heute", "Today")}</button></div></div>`;
+  }
+
+  _calSetMonth(ms) {
+    this._calMonth = ms;
+    const y = new Date(ms).getFullYear();
+    if (!this._yearDays[`${this._id("total")}|${y}`]) this._fetchYearDays(y);
+    this._render();
+  }
+
+  _calClose() {
+    this._calOpen = null;
+    if (this._calKey) { window.removeEventListener("keydown", this._calKey); this._calKey = null; }
   }
 
   // Tooltip und Zoom: Bewegen zeigt alle Werte, Ziehen wählt einen Zeitraum zum Heranzoomen,
