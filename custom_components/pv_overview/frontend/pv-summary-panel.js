@@ -108,7 +108,11 @@ const STYLE = `
   .modtile .mrot { position:absolute; top:3px; right:5px; font-size:1.25em; cursor:pointer; text-shadow:0 1px 3px #000; }
   .modbar { display:flex; align-items:center; gap:8px; margin-top:10px; font-size:12px; }
   .modbar input[type=range] { flex:1; min-width:80px; accent-color:${SUN_COLOR}; }
-  .modbar .modtm { min-width:44px; text-align:right; font-weight:500; }
+  .modclock { position:absolute; top:8px; right:8px; z-index:2; display:flex; flex-direction:column; align-items:flex-end; padding:4px 10px; border-radius:8px; background:rgba(0,0,0,.55); color:#fff; pointer-events:none; line-height:1.15; }
+  .modclock .modtm { font-size:20px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .modclock .modtm.live::before { content:""; display:inline-block; width:8px; height:8px; border-radius:50%; background:#e24b4a; margin-right:6px; vertical-align:middle; }
+  .modclock .modtot { font-size:11px; opacity:.85; font-variant-numeric:tabular-nums; }
+  @media (max-width:500px) { .modclock { top:6px; right:6px; padding:3px 8px; } .modclock .modtm { font-size:15px; } .modclock .modtot { font-size:10px; } }
   .modcard h3 .navbtns { flex-wrap:wrap; }
   .eurv { color:var(--secondary-text-color); font-size:12px; margin-left:8px; }
   .hm-wrap { position:relative; }
@@ -1950,9 +1954,9 @@ class PVSummaryPanel extends HTMLElement {
     const playing = !!this._modTimer;
     const time = (ms) => fmtTime(ms);
     return `<div class="card modcard"><h3><ha-icon icon="mdi:solar-panel"></ha-icon>${TT("Module", "Modules")}<span class="hint modmode"></span>${btns}</h3>
-      <div class="modroof-wrap${edit ? " edit" : ""}"><div class="modroof${edit ? " edit" : " fit"}" data-h="${H.toFixed(4)}"${edit ? ` style="aspect-ratio:1 / ${H.toFixed(4)};background-size:5% ${(5 / H).toFixed(3)}%"` : ""}>${roof}</div></div>
+      <div class="modroof-wrap${edit ? " edit" : ""}"><div class="modroof${edit ? " edit" : " fit"}" data-h="${H.toFixed(4)}"${edit ? ` style="aspect-ratio:1 / ${H.toFixed(4)};background-size:5% ${(5 / H).toFixed(3)}%"` : ""}>${roof}${edit ? "" : `<div class="modclock"><b class="modtm"></b><span class="modtot"></span></div>`}</div></div>
       <div class="modbar"><button class="navbtn" data-nav="mod-play" title="${TT("Tag abspielen", "Play the day")}">${playing ? "❚❚" : "▶"}</button><button class="navbtn modspeed" data-nav="mod-speed" title="${TT("Tempo beim Abspielen", "Playback speed")}">${fmt(this._modSpeed, this._modSpeed < 0.5 ? 2 : this._modSpeed < 1 ? 1 : 0)}×</button>
-        <span class="muted">${time(a)}</span><input type="range" class="modsl" min="${a}" max="${b}" step="${5 * 60000}" value="${this._modT ?? b}"><span class="muted">${time(b)}</span><b class="modtm"></b></div>
+        <span class="muted">${time(a)}</span><input type="range" class="modsl" min="${a}" max="${b}" step="${5 * 60000}" value="${this._modT ?? b}"><span class="muted">${time(b)}</span></div>
       <div class="muted modsum" style="font-size:12px"></div></div>`;
   }
 
@@ -1985,7 +1989,12 @@ class PVSummaryPanel extends HTMLElement {
       el.querySelector(".mv").textContent = fmtW(vals[i]);
     });
     const total = Object.values(pow).reduce((x, y) => x + y, 0);
-    card.querySelector(".modtm").textContent = live ? TT("live", "live") : this._modT !== null ? fmtTime(this._modT) : "";
+    const tm = card.querySelector(".modtm");
+    if (tm) {
+      tm.textContent = live ? TT("live", "live") : this._modT !== null ? fmtTime(this._modT) : "";
+      tm.classList.toggle("live", !!live);
+      card.querySelector(".modtot").textContent = `Σ ${fmtW(total)}`;
+    }
     const sl = card.querySelector(".modsl");
     if (sl && this._modT !== null) sl.value = this._modT;
     const liveBtn = card.querySelector(".modlive");
@@ -2023,9 +2032,13 @@ class PVSummaryPanel extends HTMLElement {
     const maxW = Math.max(...d.map((t) => t.w));
     const scale = Math.min((0.92 / bw) * W, (0.22 / maxW) * W, 180 / maxW);
     const pad = Math.max(12, W * 0.03);
-    roof.style.minHeight = `${Math.round(bh * scale + 2 * pad)}px`;
+    // Oben Platz für die Zeitplakette nur, wenn die (mittig gesetzten) Kacheln bis unter sie reichen würden
+    const clock = roof.querySelector(".modclock");
+    const reach = (W + bw * scale) / 2, clockLeft = clock ? W - 8 - clock.offsetWidth - 6 : W;
+    const top = pad + (clock && reach > clockLeft ? Math.max(0, clock.offsetHeight + 14 - pad) : 0);
+    roof.style.minHeight = `${Math.round(bh * scale + top + pad)}px`;
     const H = roof.clientHeight;
-    const offX = (W - bw * scale) / 2 - minX * scale, offY = (H - bh * scale) / 2 - minY * scale;
+    const offX = (W - bw * scale) / 2 - minX * scale, offY = top + (H - top - pad - bh * scale) / 2 - minY * scale;
     for (const t of d) {
       Object.assign(t.el.style, { left: `${(offX + t.x * scale).toFixed(1)}px`, top: `${(offY + t.y * scale).toFixed(1)}px`, width: `${(t.w * scale).toFixed(1)}px`, height: `${(t.h * scale).toFixed(1)}px` });
       font(t.el, Math.min(t.w, t.h) * scale);
