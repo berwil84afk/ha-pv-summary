@@ -3,6 +3,9 @@
 
 const COLORS = { pv: "#f0a30a", bat: "#1d9e75", house: "#5b7290", grid: "#7f77dd" };
 // Farben für einzelne Strings (wiederholen sich ab dem 9. String)
+// Modulansicht: Seitenverhältnis der Kacheln (Höhe zu Breite, 1.762 × 1.134 mm) und Tempostufen beim Abspielen
+const MODULE_RATIO = 1762 / 1134;
+const MOD_SPEEDS = [0.25, 0.5, 1, 2, 4];
 const STRING_COLORS = ["#f0a30a", "#1d9e75", "#7f77dd", "#d85a30", "#378add", "#d4537e", "#639922", "#888780"];
 const HISTORY_REFRESH_MS = 5 * 60 * 1000;
 const LIVE_RENDER_MS = 2000;
@@ -97,6 +100,7 @@ const STYLE = `
   .modroof.edit { outline:1px dashed var(--divider-color, rgba(0,0,0,.25)); background-image:linear-gradient(var(--divider-color, rgba(0,0,0,.08)) 1px, transparent 1px), linear-gradient(90deg, var(--divider-color, rgba(0,0,0,.08)) 1px, transparent 1px);  }
   .modtile { position:absolute; box-sizing:border-box; border-radius:6px; border:3px solid #9aa6b5; padding:6px; display:flex; flex-direction:column; justify-content:flex-end; color:#fff; cursor:pointer; transition:background 1s ease, box-shadow 1s ease; user-select:none; overflow:hidden; }
   .modtile.black { border-color:#000; }
+  .modroof.scrub .modtile { transition:none; }
   .modroof.edit .modtile { cursor:grab; transition:none; touch-action:none; }
   .modroof.edit .modtile.drag { cursor:grabbing; z-index:2; outline:2px solid var(--primary-color, #03a9f4); }
   .modtile .mn { font-size:1em; text-shadow:0 1px 3px #000; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -230,7 +234,7 @@ class PVSummaryPanel extends HTMLElement {
     this._modDraft = null;   // Anordnung während des Bearbeitens
     this._modDrag = null;    // gerade gezogene Kachel
     this._modTimer = null;   // Abspielen des Tages
-    this._modSpeed = [0.5, 1, 2, 4].includes(Number(loadPref("pv-summary-modspeed", "1"))) ? Number(loadPref("pv-summary-modspeed", "1")) : 1;
+    this._modSpeed = MOD_SPEEDS.includes(Number(loadPref("pv-summary-modspeed", "1"))) ? Number(loadPref("pv-summary-modspeed", "1")) : 1;
     this._calOpen = null;    // Kalender offen an dieser Kurve ("main"/"strings") oder null
     this._calMonth = null;   // angezeigter Monat im Kalender (Erster des Monats, ms)
     this._cardEdit = false;  // Karten anpassen aktiv
@@ -368,7 +372,7 @@ class PVSummaryPanel extends HTMLElement {
 
   _queueRender() {
     if (this._renderQueued) return;
-    if (this._drag || this._pinch || this._modDrag) { setTimeout(() => this._queueRender(), 500); return; }
+    if (this._drag || this._pinch || this._modDrag || this._modScrub) { setTimeout(() => this._queueRender(), 500); return; }
     this._renderQueued = true;
     const wait = Math.max(0, LIVE_RENDER_MS - (Date.now() - this._lastRender));
     setTimeout(() => { this._renderQueued = false; this._render(); }, wait);
@@ -866,7 +870,8 @@ class PVSummaryPanel extends HTMLElement {
 
   _render() {
     if (!this._entry || !this._content) return;
-    if (this._pinch) { this._queueRender(); return; } // laufende Zwei-Finger-Geste nicht unterbrechen
+    // Laufende Zwei-Finger-Geste, gezogene Modulkachel oder gehaltener Zeitschieber nicht unterbrechen
+    if (this._pinch || this._modDrag || this._modScrub) { this._queueRender(); return; }
     this._lastRender = Date.now();
     const parts = [this._renderHead(), this._renderCards()];
     this._content.innerHTML = parts.join("");
@@ -1846,10 +1851,10 @@ class PVSummaryPanel extends HTMLElement {
     return tiles;
   }
 
-  // Kachelgröße in Breiten der Fläche (Hochformat 4:5), bei vielen Modulen kleiner
+  // Kachelgröße in Breiten der Fläche (Hochformat wie ein Modul mit 1.134 × 1.762 mm), bei vielen Modulen kleiner
   _modSize(count) {
     const w = count <= 10 ? 0.1 : Math.max(0.05, 0.1 * Math.sqrt(10 / count));
-    return { w, h: w * 1.25 };
+    return { w, h: w * MODULE_RATIO };
   }
 
   // Höhe der Fläche in Breiten: bis zur untersten Kachel plus Rand, mindestens eine Reihe; beim Anordnen eine Reihe mehr
@@ -1946,7 +1951,7 @@ class PVSummaryPanel extends HTMLElement {
     const time = (ms) => fmtTime(ms);
     return `<div class="card modcard"><h3><ha-icon icon="mdi:solar-panel"></ha-icon>${TT("Module", "Modules")}<span class="hint modmode"></span>${btns}</h3>
       <div class="modroof-wrap${edit ? " edit" : ""}"><div class="modroof${edit ? " edit" : " fit"}" data-h="${H.toFixed(4)}"${edit ? ` style="aspect-ratio:1 / ${H.toFixed(4)};background-size:5% ${(5 / H).toFixed(3)}%"` : ""}>${roof}</div></div>
-      <div class="modbar"><button class="navbtn" data-nav="mod-play" title="${TT("Tag abspielen", "Play the day")}">${playing ? "❚❚" : "▶"}</button><button class="navbtn modspeed" data-nav="mod-speed" title="${TT("Tempo beim Abspielen", "Playback speed")}">${fmt(this._modSpeed, this._modSpeed < 1 ? 1 : 0)}×</button>
+      <div class="modbar"><button class="navbtn" data-nav="mod-play" title="${TT("Tag abspielen", "Play the day")}">${playing ? "❚❚" : "▶"}</button><button class="navbtn modspeed" data-nav="mod-speed" title="${TT("Tempo beim Abspielen", "Playback speed")}">${fmt(this._modSpeed, this._modSpeed < 0.5 ? 2 : this._modSpeed < 1 ? 1 : 0)}×</button>
         <span class="muted">${time(a)}</span><input type="range" class="modsl" min="${a}" max="${b}" step="${5 * 60000}" value="${this._modT ?? b}"><span class="muted">${time(b)}</span><b class="modtm"></b></div>
       <div class="muted modsum" style="font-size:12px"></div></div>`;
   }
@@ -1955,6 +1960,8 @@ class PVSummaryPanel extends HTMLElement {
   _updateModules() {
     const card = this._content?.querySelector(".modcard");
     if (!card) return;
+    // Beim Ziehen und Abspielen ohne Überblendung, damit die Kacheln sofort folgen
+    card.querySelector(".modroof")?.classList.toggle("scrub", !!this._modScrub || !!this._modTimer);
     const tiles = this._modTiles(), lay = this._modLayout();
     const { pow, peak, live } = this._modValues();
     const vals = tiles.map((t) => (pow[t.s.id] || 0) / t.n);
@@ -2040,6 +2047,12 @@ class PVSummaryPanel extends HTMLElement {
     }
     const sl = card.querySelector(".modsl");
     sl?.addEventListener("input", () => { this._modStop(); this._modT = Number(sl.value); this._updateModules(); });
+    // Solange der Schieber gehalten wird, nicht neu zeichnen (sonst verliert der Browser den Griff)
+    sl?.addEventListener("pointerdown", () => { this._modScrub = true; this._updateModules(); });
+    const release = () => { if (this._modScrub) { this._modScrub = false; this._updateModules(); } };
+    sl?.addEventListener("pointerup", release);
+    sl?.addEventListener("pointercancel", release);
+    sl?.addEventListener("change", release);
     const roof = card.querySelector(".modroof");
     if (!this._modEdit || !roof) return;
     // Ziehen: Position relativ zur Fläche, eingerastet auf 1 %
@@ -2103,7 +2116,7 @@ class PVSummaryPanel extends HTMLElement {
       if (this._modDraft) this._modDraft.mode = action.slice(9);
       this._render();
     } else if (action === "mod-speed") {
-      const speeds = [0.5, 1, 2, 4];
+      const speeds = MOD_SPEEDS;
       this._modSpeed = speeds[(speeds.indexOf(this._modSpeed) + 1) % speeds.length];
       savePref("pv-summary-modspeed", String(this._modSpeed));
       if (this._modTimer) { this._modStop(); this._modPlay(); }
