@@ -230,7 +230,7 @@ class PVSummaryPanel extends HTMLElement {
     this._prodMode = "30";  // "30" = letzte 30 Tage, "month" = ein Kalendermonat
     this._prodMonth = null;  // erster Tag des gewählten Monats
     this._monthDays = [];
-    this._hidden = {};       // Diagramm -> Set der ausgeblendeten Reihen (nur bis zum nächsten Tag/Zoom)
+    this._hidden = {};       // Diagramm -> Set der ausgeblendeten Reihen (bleibt bei Zoom und Tageswechsel, bis die Seite neu lädt)
     this._year = null;       // angezeigtes Jahr der Heatmap (null = aktuelles Jahr)
     this._yearDays = {};     // "Statistik-ID|Jahr" -> Tageswerte
     this._forecast = null;   // Prognose für heute: [[Stundenbeginn ms, Wh], ...] oder null
@@ -393,7 +393,6 @@ class PVSummaryPanel extends HTMLElement {
       this._modT = null;
       this._day = ms >= startOfDay(Date.now()) ? null : ms;
       this._zoom = null;
-      this._hidden = {};
       this._hover = null;
       this._fetchCurveHistory();
       return;
@@ -454,7 +453,6 @@ class PVSummaryPanel extends HTMLElement {
       const next = startOfDay(cur + (action === "day-prev" ? -1 : 1) * 36e5 * 24 + 36e5 * 2);
       this._day = next >= today ? null : next;
       this._zoom = null;
-      this._hidden = {};
       this._hover = null;
       this._fetchCurveHistory();
     } else if (action === "day-cal") {
@@ -471,12 +469,10 @@ class PVSummaryPanel extends HTMLElement {
       this._calClose();
       this._day = null;
       this._zoom = null;
-      this._hidden = {};
       this._fetchCurveHistory();
     } else if (action === "day-today") {
       this._day = null;
       this._zoom = null;
-      this._hidden = {};
       this._fetchCurveHistory();
     } else if (action === "dmode-day" || action === "dmode-full") {
       this._dayMode = action === "dmode-full" ? "full" : "day";
@@ -497,7 +493,6 @@ class PVSummaryPanel extends HTMLElement {
       this._render();
     } else if (action === "zoom-reset") {
       this._zoom = null;
-      this._hidden = {};
       this._render();
     } else if (action === "prod-30" || action === "prod-month") {
       this._prodMode = action === "prod-30" ? "30" : "month";
@@ -1610,7 +1605,6 @@ class PVSummaryPanel extends HTMLElement {
         const a = c.tAt(Math.min(drag.x0, drag.x1)), b = c.tAt(Math.max(drag.x0, drag.x1));
         const m = (a + b) / 2;
         if (b - a < ZOOM_MIN_MS) this._setZoom(m - ZOOM_MIN_MS / 2, m + ZOOM_MIN_MS / 2); else this._setZoom(a, b);
-        this._hidden = {};
         this._hover = null;
         this._render();
       };
