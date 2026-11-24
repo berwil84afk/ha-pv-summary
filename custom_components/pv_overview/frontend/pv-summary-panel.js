@@ -199,6 +199,7 @@ const STYLE = `
   .ovl-chart .tip .dev { font-size:11px; color:var(--secondary-text-color); text-align:right; margin:1px 0 6px; }
   .ovl-chart .tip .split { display:flex; height:8px; border-radius:4px; overflow:hidden; margin:2px 0 4px; }
   .ovl-chart .tip .sep { border-top:1px solid var(--divider-color, rgba(0,0,0,.12)); margin-top:5px; padding-top:4px; }
+  .ovl-unit { margin-left:auto; display:inline-flex; gap:4px; }
   .ovl-sum { display:flex; flex-wrap:wrap; gap:4px 18px; align-items:baseline; font-size:14px; margin-bottom:4px; }
   .ovl-sum b { font-weight:500; }
   .ovl-sum .aut { color:${COLORS.bat}; }
@@ -238,6 +239,7 @@ class PVSummaryPanel extends HTMLElement {
     this._modDraft = null;   // Anordnung während des Bearbeitens
     this._modDrag = null;    // gerade gezogene Kachel
     this._modTimer = null;   // Abspielen des Tages
+    this._ownUnit = loadPref("pv-summary-ownunit", "pct") === "kwh" ? "kwh" : "pct";  // Eigenverbrauch-Fenster: Prozent oder kWh
     this._modSpeed = MOD_SPEEDS.includes(Number(loadPref("pv-summary-modspeed", "1"))) ? Number(loadPref("pv-summary-modspeed", "1")) : 1;
     this._calOpen = null;    // Kalender offen an dieser Kurve ("main"/"strings") oder null
     this._calMonth = null;   // angezeigter Monat im Kalender (Erster des Monats, ms)
@@ -747,6 +749,14 @@ class PVSummaryPanel extends HTMLElement {
 
   _onOverlayClick(ev) {
     if (ev.target.classList.contains("ovl-back") || ev.target.closest("[data-ovl=close]")) { this._closeOverlay(); return; }
+    const unit = ev.target.closest("[data-ovl-unit]");
+    if (unit) {
+      this._ownUnit = unit.dataset.ovlUnit === "kwh" ? "kwh" : "pct";
+      savePref("pv-summary-ownunit", this._ownUnit);
+      this._ovl.sel = null;
+      this._renderOverlay();
+      return;
+    }
     if (ev.target.closest("[data-ovl=history]")) {
       const entityId = this._id(this._ovl?.kind === "own" ? "grid_export_today" : "house_today");
       this._closeOverlay();
@@ -860,7 +870,7 @@ class PVSummaryPanel extends HTMLElement {
     else if (own) {
       const st = this._overlayStats();
       const since = `<span class="muted">${o.days.length < 30 ? `${TT("Daten seit", "Data since")} ${fmtDayMonth(o.days[0].start)} · ` : ""}${TT("nur volle Tage", "full days only")}</span>`;
-      body = `<div class="ovl-sum">${st.own !== null ? `<span>${TT("Ø Eigenverbrauch", "Avg self-consumption")} <b style="color:${COLORS.pv}">${fmt(st.own, 0)} %</b></span>` : ""}${st.expAvg !== null ? `<span>${TT("Ø eingespeist", "Avg exported")} <b>${fmt(st.expAvg, 1)} kWh</b></span><span>${TT("zusammen", "in total")} <b>${fmt(st.expSum, 1)} kWh</b></span>` : ""}${since}</div>
+      body = `<div class="ovl-sum">${st.own !== null ? `<span>${TT("Ø Eigenverbrauch", "Avg self-consumption")} <b style="color:${COLORS.pv}">${fmt(st.own, 0)} %</b></span>` : ""}${st.expAvg !== null ? `<span>${TT("Ø eingespeist", "Avg exported")} <b>${fmt(st.expAvg, 1)} kWh</b></span><span>${TT("zusammen", "in total")} <b>${fmt(st.expSum, 1)} kWh</b></span>` : ""}${since}<span class="ovl-unit"><button class="navbtn ${this._ownUnit === "pct" ? "active" : ""}" data-ovl-unit="pct">%</button><button class="navbtn ${this._ownUnit === "kwh" ? "active" : ""}" data-ovl-unit="kwh">kWh</button></span></div>
         ${this._ownChart(st)}`;
     } else {
       const st = this._overlayStats();
@@ -875,21 +885,25 @@ class PVSummaryPanel extends HTMLElement {
     </div></div>`;
   }
 
-  // Eigenverbrauch: je Tag ein Balken in Höhe der PV-Erzeugung, unten selbst genutzt, oben eingespeist
+  // Eigenverbrauch je Tag: unten selbst genutzt, oben eingespeist; in Prozent (Balken = 100 % der PV) oder in kWh (Balkenhöhe = PV)
   _ownChart(st) {
     const days = this._ovl.days, n = days.length;
     const W = Math.max(300, Math.min(760, window.innerWidth - 32) - 34), H = 220, L = 36, R = 6, T = 10, B = 22;
-    const maxV = niceMax(Math.max(1, ...days.map((d) => d.pv)));
+    const pctMode = this._ownUnit !== "kwh";
+    const maxV = pctMode ? 100 : niceMax(Math.max(1, ...days.map((d) => d.pv)));
     const y = (v) => T + (1 - v / maxV) * (H - T - B);
     const slot = (W - L - R) / n, gw = Math.min(46, slot * 0.7);
     const every = slot >= 44 ? 1 : [5, 10, 15].find((k) => slot * k >= 44) ?? 30;
     let svg = "";
-    for (const v of ticks(0, maxV)) svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--divider-color, rgba(0,0,0,.1))"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmtAxis(v)}</text>`;
+    for (const v of pctMode ? [0, 25, 50, 75, 100] : ticks(0, maxV)) svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--divider-color, rgba(0,0,0,.1))"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${pctMode ? `${v} %` : fmtAxis(v)}</text>`;
     days.forEach((d, i) => {
       const cx = L + slot * i + slot / 2, gx = (cx - gw / 2).toFixed(1);
       const today = st.isToday(d), partial = d === st.partial;
       const op = today ? 0.6 : partial ? 0.35 : 1;
-      const yOwn = y(d.pv - d.exp), yTop = y(d.pv), base = H - B;
+      const pct = d.pv > 0 ? Math.min(100, Math.max(0, (1 - d.exp / d.pv) * 100)) : null;
+      const base = H - B;
+      const yOwn = pctMode ? (pct === null ? base : y(pct)) : y(d.pv - d.exp);
+      const yTop = pctMode ? (pct === null ? base : y(100)) : y(d.pv);
       svg += `<g data-day="${i}" class="oday${this._ovl.sel === i ? " on" : ""}"><rect x="${(cx - slot / 2).toFixed(1)}" y="${T}" width="${slot.toFixed(1)}" height="${H - T - B}" class="ohit"/>`
         + (base - yOwn > 0 ? `<rect x="${gx}" y="${yOwn.toFixed(1)}" width="${gw.toFixed(1)}" height="${(base - yOwn).toFixed(1)}" fill="${COLORS.pv}" fill-opacity="${op}"/>` : "")
         + (yOwn - yTop > 0 ? `<rect x="${gx}" y="${yTop.toFixed(1)}" width="${gw.toFixed(1)}" height="${(yOwn - yTop).toFixed(1)}" rx="2" fill="${COLORS.grid}" fill-opacity="${op}"/>` : "")
@@ -897,8 +911,14 @@ class PVSummaryPanel extends HTMLElement {
       if ((n - 1 - i) % every) return;
       svg += `<text x="${cx.toFixed(1)}" y="${H - 6}" text-anchor="middle" pointer-events="none">${fmtDayMonth(d.start)}</text>`;
     });
+    // Ø Eigenverbrauch als gestrichelte Linie
+    if (pctMode && st.own !== null) {
+      const ya = y(st.own).toFixed(1);
+      svg += `<line x1="${L}" x2="${W - R}" y1="${ya}" y2="${ya}" stroke="var(--primary-text-color)" stroke-opacity=".7" stroke-dasharray="4 3" pointer-events="none"/>`;
+    }
     const notes = [
-      TT("Balkenhöhe = PV-Erzeugung", "bar height = PV production"),
+      pctMode ? TT("Balken = 100 % der PV-Erzeugung des Tages", "bar = 100 % of the day's PV production") : TT("Balkenhöhe = PV-Erzeugung", "bar height = PV production"),
+      pctMode && st.own !== null ? TT("gestrichelt = Ø", "dashed = avg") : "",
       st.partial ? TT("blass = erster Tag (unvollständig)", "faded = first day (incomplete)") : "",
       days.some(st.isToday) ? TT("heute heller", "today lighter") : "",
     ].filter(Boolean).join(" · ");

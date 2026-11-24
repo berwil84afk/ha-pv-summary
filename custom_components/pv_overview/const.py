@@ -17,7 +17,7 @@ CONF_PRICE_EXPORT = "price_export"  # Einspeisevergütung je kWh
 CONF_INVESTMENT = "investment"  # Anschaffungskosten der Anlage
 
 # Eigenes Dashboard (Panel in der Seitenleiste)
-VERSION = "1.20.0"
+VERSION = "1.20.1"
 # Eigene Adresse, damit sie nicht mit einem Lovelace-Dashboard "pv-summary" kollidiert
 PANEL_URL = "pv-summary-panel"
 STATIC_URL = "/pv_summary_static"
