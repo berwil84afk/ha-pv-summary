@@ -685,13 +685,13 @@ class PVSummaryPanel extends HTMLElement {
   // ------------------------------------------------------------------ Overlay „Haus heute“
 
   async _openOverlay(kind) {
-    if (kind !== "house") return;
+    if (kind !== "house" && kind !== "own") return;
     const entry = this._entry;
     this._ovl = { kind, loading: true, days: [], sel: null };
     window.addEventListener("keydown", this._onKey);
     this._renderOverlay();
     const start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - 29);
-    const keys = { house: "house_total", pv: "total", imp: "grid_import_total" };
+    const keys = kind === "own" ? { pv: "total", exp: "grid_export_total" } : { house: "house_total", pv: "total", imp: "grid_import_total" };
     const ids = Object.fromEntries(Object.entries(keys).map(([k, key]) => [k, this._id(key)]).filter(([, id]) => id));
     let byDay = {};
     try {
@@ -714,6 +714,18 @@ class PVSummaryPanel extends HTMLElement {
     }
     if (!this._ovl || this._entry !== entry) return;
     // Heute aus den Live-Sensoren (die Statistik hinkt bis zu einer Stunde hinterher)
+    if (kind === "own") {
+      const pv = this._num("today"), exp = this._num("grid_export_today");
+      if (pv !== null && exp !== null) {
+        const s = new Date(); s.setHours(0, 0, 0, 0);
+        Object.assign((byDay[s.toDateString()] ||= { start: s }), { pv, exp });
+      }
+      this._ovl.days = Object.values(byDay).filter((d) => d.pv !== undefined && d.exp !== undefined)
+        .map((d) => ({ ...d, exp: Math.min(Math.max(d.exp, 0), Math.max(d.pv, 0)) })).sort((a, b) => a.start - b.start).slice(-30);
+      this._ovl.loading = false;
+      this._renderOverlay();
+      return;
+    }
     const liveHouse = this._num("house_today");
     if (liveHouse !== null) {
       const start = new Date(); start.setHours(0, 0, 0, 0);
@@ -736,7 +748,7 @@ class PVSummaryPanel extends HTMLElement {
   _onOverlayClick(ev) {
     if (ev.target.classList.contains("ovl-back") || ev.target.closest("[data-ovl=close]")) { this._closeOverlay(); return; }
     if (ev.target.closest("[data-ovl=history]")) {
-      const entityId = this._id("house_today");
+      const entityId = this._id(this._ovl?.kind === "own" ? "grid_export_today" : "house_today");
       this._closeOverlay();
       if (entityId) this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId }, bubbles: true, composed: true }));
       return;
@@ -772,6 +784,22 @@ class PVSummaryPanel extends HTMLElement {
     const date = d.start.toLocaleDateString(LOCALE(), { weekday: "short", day: "numeric", month: "long" });
     const today = st.isToday(d);
     let html = `<div class="time">${date}${today ? ` <span class="muted">${TT("(bis jetzt)", "(so far)")}</span>` : ""}</div>`;
+    if (this._ovl.kind === "own") {
+      const own = d.pv - d.exp, pct = d.pv > 0 ? (own / d.pv) * 100 : null;
+      html += row("", TT("PV-Erzeugung", "PV production"), `${fmt(d.pv, 1)} kWh`);
+      html += `<div class="split"><span style="width:${(pct ?? 0).toFixed(1)}%;background:${COLORS.pv}"></span><span style="flex:1;background:${COLORS.grid}"></span></div>`
+        + row(COLORS.pv, TT("selbst genutzt", "used yourself"), `${fmt(own, 1)} kWh`)
+        + row(COLORS.grid, TT("eingespeist", "exported"), `${fmt(d.exp, 1)} kWh`);
+      if (pct !== null) {
+        html += row("", TT("Eigenverbrauch", "Self-consumption"), `<span style="color:${COLORS.pv}">${fmt(pct, 0)} %</span>`, " sep");
+        if (st.own !== null && !today && d !== st.partial) {
+          const dev = pct - st.own;
+          html += `<div class="dev">${dev >= 0 ? "+" : "−"}${fmt(Math.abs(dev), 0)} ${TT("Prozentpunkte ggü. Ø", "points vs. avg")} ${fmt(st.own, 0)} %</div>`;
+        }
+      }
+      if (d === st.partial) html += `<div class="muted" style="margin-top:4px">${TT("erster Tag, unvollständig", "first day, incomplete")}</div>`;
+      return html;
+    }
     html += row("", TT("Hausverbrauch", "House consumption"), `${fmt(d.house, 1)} kWh`);
     if (st.avg && !today && d !== st.partial) {
       const dev = ((d.house - st.avg) / st.avg) * 100;
@@ -797,14 +825,20 @@ class PVSummaryPanel extends HTMLElement {
     const todayKey = new Date().toDateString();
     const isToday = (d) => d.start.toDateString() === todayKey;
     let full = days.filter((d) => !isToday(d));
+    const main = this._ovl.kind === "own" ? "pv" : "house";
     // Erster Tag der Statistik (meist der Einrichtungstag): unvollständig, wenn auffällig klein
     let partial = null;
     if (full.length > 1 && days[0] === full[0]) {
       const rest = full.slice(1);
-      const restAvg = rest.reduce((a, d) => a + d.house, 0) / rest.length;
-      if (full[0].house < restAvg * 0.5) { partial = full[0]; full = rest; }
+      const restAvg = rest.reduce((a, d) => a + d[main], 0) / rest.length;
+      if (full[0][main] < restAvg * 0.5) { partial = full[0]; full = rest; }
     }
     const sum = (k) => full.reduce((a, d) => a + (d[k] ?? 0), 0);
+    if (main === "pv") {
+      // Eigenverbrauch über alle vollen Tage (energiegewichtet), Einspeisung je Tag und zusammen
+      const pv = sum("pv"), exp = sum("exp");
+      return { isToday, partial, n: full.length, own: pv > 0 ? (1 - exp / pv) * 100 : null, expAvg: full.length ? exp / full.length : null, expSum: exp };
+    }
     const avg = full.length ? sum("house") / full.length : null;
     const withImp = full.length > 0 && full.every((d) => d.imp !== undefined);
     const aut = withImp ? autarky(sum("imp"), sum("house")) : null;
@@ -814,22 +848,61 @@ class PVSummaryPanel extends HTMLElement {
   _renderOverlay() {
     const o = this._ovl;
     if (!o || !this._ovlEl) return;
-    const title = TT("Hausverbrauch, letzte 30 Tage", "House consumption, last 30 days");
-    const legend = `<span class="hint"><span><span class="dot" style="background:${COLORS.house}"></span>${TT("Haus", "House")}</span><span><span class="dot" style="background:${COLORS.pv}"></span>PV</span></span>`;
+    const own = o.kind === "own";
+    const title = own ? TT("Eigenverbrauch, letzte 30 Tage", "Self-consumption, last 30 days") : TT("Hausverbrauch, letzte 30 Tage", "House consumption, last 30 days");
+    const dot = (c, t) => `<span><span class="dot" style="background:${c}"></span>${t}</span>`;
+    const legend = own
+      ? `<span class="hint">${dot(COLORS.pv, TT("selbst genutzt", "used yourself"))}${dot(COLORS.grid, TT("eingespeist", "exported"))}</span>`
+      : `<span class="hint">${dot(COLORS.house, TT("Haus", "House"))}${dot(COLORS.pv, "PV")}</span>`;
     let body;
     if (o.loading) body = `<div class="empty">${LOADING()}</div>`;
-    else if (!o.days.length) body = `<div class="empty">${TT("Noch keine Tageswerte für den Hausverbrauch.", "No daily values for the house consumption yet.")}</div>`;
-    else {
+    else if (!o.days.length) body = `<div class="empty">${own ? TT("Noch keine Tageswerte für Erzeugung und Einspeisung.", "No daily values for production and export yet.") : TT("Noch keine Tageswerte für den Hausverbrauch.", "No daily values for the house consumption yet.")}</div>`;
+    else if (own) {
+      const st = this._overlayStats();
+      const since = `<span class="muted">${o.days.length < 30 ? `${TT("Daten seit", "Data since")} ${fmtDayMonth(o.days[0].start)} · ` : ""}${TT("nur volle Tage", "full days only")}</span>`;
+      body = `<div class="ovl-sum">${st.own !== null ? `<span>${TT("Ø Eigenverbrauch", "Avg self-consumption")} <b style="color:${COLORS.pv}">${fmt(st.own, 0)} %</b></span>` : ""}${st.expAvg !== null ? `<span>${TT("Ø eingespeist", "Avg exported")} <b>${fmt(st.expAvg, 1)} kWh</b></span><span>${TT("zusammen", "in total")} <b>${fmt(st.expSum, 1)} kWh</b></span>` : ""}${since}</div>
+        ${this._ownChart(st)}`;
+    } else {
       const st = this._overlayStats();
       const since = `<span class="muted">${o.days.length < 30 ? `${TT("Daten seit", "Data since")} ${fmtDayMonth(o.days[0].start)} · ` : ""}${TT("nur volle Tage", "full days only")}</span>`;
       body = `<div class="ovl-sum">${st.avg !== null ? `<span>${TT("Ø Haus", "Avg house")} <b>${fmt(st.avg, 1)} kWh</b></span>` : ""}${st.aut !== null ? `<span class="aut">${TT("Autarkie", "Self-sufficiency")} <b>${fmt(st.aut, 0)} %</b></span>` : ""}${since}</div>
         ${this._overlayChart(st)}`;
     }
     this._ovlEl.innerHTML = `<div class="ovl-back"><div class="ovl card" role="dialog" aria-modal="true" aria-label="${title}">
-      <h3><ha-icon icon="mdi:home-lightning-bolt-outline"></ha-icon>${title}${legend}<button class="navbtn" data-ovl="close" title="${TT("Schließen", "Close")}">✕</button></h3>
+      <h3><ha-icon icon="${own ? "mdi:solar-power-variant-outline" : "mdi:home-lightning-bolt-outline"}"></ha-icon>${title}${legend}<button class="navbtn" data-ovl="close" title="${TT("Schließen", "Close")}">✕</button></h3>
       ${body}
       <div class="ovl-foot"><button class="navbtn" data-ovl="history">${TT("Verlauf öffnen", "Open history")}</button></div>
     </div></div>`;
+  }
+
+  // Eigenverbrauch: je Tag ein Balken in Höhe der PV-Erzeugung, unten selbst genutzt, oben eingespeist
+  _ownChart(st) {
+    const days = this._ovl.days, n = days.length;
+    const W = Math.max(300, Math.min(760, window.innerWidth - 32) - 34), H = 220, L = 36, R = 6, T = 10, B = 22;
+    const maxV = niceMax(Math.max(1, ...days.map((d) => d.pv)));
+    const y = (v) => T + (1 - v / maxV) * (H - T - B);
+    const slot = (W - L - R) / n, gw = Math.min(46, slot * 0.7);
+    const every = slot >= 44 ? 1 : [5, 10, 15].find((k) => slot * k >= 44) ?? 30;
+    let svg = "";
+    for (const v of ticks(0, maxV)) svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--divider-color, rgba(0,0,0,.1))"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmtAxis(v)}</text>`;
+    days.forEach((d, i) => {
+      const cx = L + slot * i + slot / 2, gx = (cx - gw / 2).toFixed(1);
+      const today = st.isToday(d), partial = d === st.partial;
+      const op = today ? 0.6 : partial ? 0.35 : 1;
+      const yOwn = y(d.pv - d.exp), yTop = y(d.pv), base = H - B;
+      svg += `<g data-day="${i}" class="oday${this._ovl.sel === i ? " on" : ""}"><rect x="${(cx - slot / 2).toFixed(1)}" y="${T}" width="${slot.toFixed(1)}" height="${H - T - B}" class="ohit"/>`
+        + (base - yOwn > 0 ? `<rect x="${gx}" y="${yOwn.toFixed(1)}" width="${gw.toFixed(1)}" height="${(base - yOwn).toFixed(1)}" fill="${COLORS.pv}" fill-opacity="${op}"/>` : "")
+        + (yOwn - yTop > 0 ? `<rect x="${gx}" y="${yTop.toFixed(1)}" width="${gw.toFixed(1)}" height="${(yOwn - yTop).toFixed(1)}" rx="2" fill="${COLORS.grid}" fill-opacity="${op}"/>` : "")
+        + "</g>";
+      if ((n - 1 - i) % every) return;
+      svg += `<text x="${cx.toFixed(1)}" y="${H - 6}" text-anchor="middle" pointer-events="none">${fmtDayMonth(d.start)}</text>`;
+    });
+    const notes = [
+      TT("Balkenhöhe = PV-Erzeugung", "bar height = PV production"),
+      st.partial ? TT("blass = erster Tag (unvollständig)", "faded = first day (incomplete)") : "",
+      days.some(st.isToday) ? TT("heute heller", "today lighter") : "",
+    ].filter(Boolean).join(" · ");
+    return `<div class="ovl-chart"><svg viewBox="0 0 ${W} ${H}">${svg}</svg><div class="tip" style="display:none"></div></div><div class="muted" style="font-size:12px">${notes}</div>`;
   }
 
   _overlayChart(st) {
@@ -1195,7 +1268,8 @@ class PVSummaryPanel extends HTMLElement {
     return kpi("grid_import_today", "mdi:shield-home-outline", COLORS.bat, TT("Autarkie heute", "Self-sufficiency today"), aut === null ? "–" : fmt(aut, 0), "%",
         sub(`${fmt(imp, 2)} kWh ${TT("aus dem Netz", "from the grid")}`))
       + kpi("grid_export_today", "mdi:solar-power-variant-outline", COLORS.pv, TT("Eigenverbrauch heute", "Self-consumption today"), own === null ? "–" : fmt(own, 0), "%",
-        sub(`${fmt(exp, 2)} kWh ${TT("eingespeist", "exported")}`));
+        sub(`${fmt(exp, 2)} kWh ${TT("eingespeist", "exported")} · ${TT("30 Tage ›", "30 days ›")}`),
+        `data-open-ovl="own" title="${TT("Eigenverbrauch und Einspeisung der letzten 30 Tage", "Self-consumption and export, last 30 days")}"`);
   }
 
   // Tageskurve mit Tooltip; defs: [{ key, color, label, fill?, peak?, signed? }]

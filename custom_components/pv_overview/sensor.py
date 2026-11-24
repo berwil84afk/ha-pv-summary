@@ -25,6 +25,7 @@ from homeassistant.const import (
     UnitOfTime,
 )
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, State, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
@@ -32,6 +33,10 @@ from homeassistant.helpers.typing import StateType
 
 from .const import DOMAIN
 from .tracker import Battery, PVString, PVTracker
+
+# Neuere Home-Assistant-Versionen verknüpfen Unter-Geräte über die Geräte-ID (via_device_id),
+# ältere nur über das Kennungspaar (via_device, ab HA 2027.8 entfernt)
+_VIA_DEVICE_ID = "via_device_id" in DeviceInfo.__annotations__
 
 if TYPE_CHECKING:
     from . import PVConfigEntry
@@ -366,7 +371,7 @@ def _device_info(entry: PVConfigEntry, tracker: PVTracker) -> DeviceInfo:
     )
 
 
-def _sub_device_info(entry: PVConfigEntry, sub_id: str, title: str, model: str) -> DeviceInfo:
+def _sub_device_info(entry: PVConfigEntry, sub_id: str, title: str, model: str, via: dict[str, Any]) -> DeviceInfo:
     """Eigenes Gerät je Akku/String, verknüpft mit der Anlage."""
     return DeviceInfo(
         identifiers={(DOMAIN, f"{entry.entry_id}_{sub_id}")},
@@ -374,7 +379,7 @@ def _sub_device_info(entry: PVConfigEntry, sub_id: str, title: str, model: str) 
         manufacturer="PV Summary",
         model=model,
         entry_type=DeviceEntryType.SERVICE,
-        via_device=(DOMAIN, entry.entry_id),
+        **via,
     )
 
 
@@ -401,10 +406,15 @@ async def async_setup_entry(
         PVOverviewSensor(tracker, f"{entry.entry_id}_{desc.key}", main_device, desc) for desc in descriptions
     )
 
-    # Je Akku und String eigene Sensoren an einem eigenen Gerät
+    # Je Akku und String eigene Sensoren an einem eigenen Gerät. Das Anlagen-Gerät dafür vorab
+    # anlegen, damit seine Geräte-ID für via_device_id feststeht.
+    via: dict[str, Any] = {"via_device": (DOMAIN, entry.entry_id)}
+    if _VIA_DEVICE_ID and (tracker.batteries or tracker.strings):
+        main = dr.async_get(hass).async_get_or_create(config_entry_id=entry.entry_id, **main_device)
+        via = {"via_device_id": main.id}
     for battery in tracker.batteries.values():
         prefix = f"{entry.entry_id}_{battery.sub_id}_"
-        device = _sub_device_info(entry, battery.sub_id, battery.title, "Akku")
+        device = _sub_device_info(entry, battery.sub_id, battery.title, "Akku", via)
         entities: list[SensorEntity] = []
         if battery.power_entity:
             entities += [PVOverviewSensor(tracker, prefix + d.key, device, d) for d in _battery_sensors(battery)]
@@ -419,7 +429,7 @@ async def async_setup_entry(
 
     for pv_string in tracker.strings.values():
         prefix = f"{entry.entry_id}_{pv_string.sub_id}_"
-        device = _sub_device_info(entry, pv_string.sub_id, pv_string.title, "PV-String")
+        device = _sub_device_info(entry, pv_string.sub_id, pv_string.title, "PV-String", via)
         entities = [PVOverviewSensor(tracker, prefix + d.key, device, d) for d in _string_sensors(pv_string)]
         for desc, source in (
             (MIRROR_STRING_VOLTAGE, pv_string.voltage_entity),
